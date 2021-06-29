@@ -1,0 +1,12 @@
+[package]
+name = "beancount-language-server"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1"
+beancount-core = { git = "https://github.com/twilco/beancount" }
+beancount-parser = { git = "https://github.com/twilco/beancount" }
+tower-lsp = "0"
+tokio = { version = "1", features = ["io-std", "fs", "macros", "rt-multi-thread"] }
+trie-rs = "0"
