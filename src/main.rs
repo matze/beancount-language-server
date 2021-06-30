@@ -1,5 +1,3 @@
-use beancount_core::Directive;
-use beancount_parser::parse;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::read_to_string;
@@ -7,10 +5,11 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tree_sitter::Language;
 use trie_rs::{Trie, TrieBuilder};
 
 struct State {
-    lines: Vec<String>,
+    text: String,
     trie_builder: TrieBuilder<String>,
     trie: Option<Trie<String>>,
 }
@@ -18,14 +17,16 @@ struct State {
 struct Backend {
     client: Client,
     state: Arc<RwLock<State>>,
+    language: Language,
 }
 
 impl Backend {
     fn new(client: Client) -> Self {
         Self {
             client,
+            language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State {
-                lines: vec![],
+                text: "".to_string(),
                 trie_builder: TrieBuilder::new(),
                 trie: None,
             })),
@@ -38,29 +39,48 @@ impl Backend {
     ///
     /// TODO: recursively load included ledgers to retrieve all accounts.
     async fn load_ledgers(&self, filename: &Path) -> anyhow::Result<()> {
-        let content = read_to_string(filename).await?;
-        let ledger = parse(&content)?;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(self.language)?;
 
         let mut state = self.state.write().await;
+        let text = read_to_string(filename).await?;
+        let tree = parser.parse(&text, None).unwrap();
+        let mut cursor = tree.root_node().walk();
 
-        for postings in ledger.directives.iter().filter_map(|d| match d {
-            Directive::Transaction(txn) => Some(&txn.postings),
-            _ => None,
-        }) {
-            for posting in postings {
-                let mut sequence = vec![posting.account.ty.default_name().to_string()];
+        let transactions = tree
+            .root_node()
+            .children(&mut cursor)
+            .filter(|c| c.kind() == "transaction")
+            .collect::<Vec<_>>();
 
-                for part in &posting.account.parts {
-                    sequence.push(part.to_string());
+        for transaction in transactions {
+            let lists = transaction
+                .children_by_field_name("posting_or_kv_list", &mut cursor)
+                .collect::<Vec<_>>();
+
+            for list in lists {
+                let postings = list
+                    .children(&mut cursor)
+                    .filter(|c| c.kind() == "posting")
+                    .collect::<Vec<_>>();
+
+                for posting in postings {
+                    for account in posting.children_by_field_name("account", &mut cursor) {
+                        state.trie_builder.push(
+                            account
+                                .utf8_text(&text.as_bytes())?
+                                .split(":")
+                                .map(|p| p.to_string())
+                                .collect::<Vec<String>>(),
+                        );
+                    }
                 }
-
-                state.trie_builder.push(sequence);
             }
         }
 
         let trie = state.trie_builder.build();
         state.trie.insert(trie);
-        state.lines = content.split("\n").map(|line| line.to_string()).collect();
+        state.text = text;
 
         Ok(())
     }
@@ -105,19 +125,15 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let mut state = self.state.write().await;
-
-        state.lines = params.content_changes[0]
-            .text
-            .split("\n")
-            .map(|line| line.to_string())
-            .collect();
+        state.text = params.content_changes[0].text.clone();
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         if params
             .context
             .map_or(None, |c| c.trigger_character)
-            .map_or(None, |c| if c == ":" { Some(()) } else { None }).is_none()
+            .map_or(None, |c| if c == ":" { Some(()) } else { None })
+            .is_none()
         {
             return Ok(None);
         }
@@ -128,12 +144,37 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let line_index = params.text_document_position.position.line as usize;
-        let char_index = params.text_document_position.position.character as usize - 1;
-        let line = &state.lines[line_index][..char_index];
-        let start = line.rfind(char::is_whitespace).unwrap_or(0) + 1;
-        let line = &state.lines[line_index][start..char_index];
-        let sequence: Vec<String> = line.split(":").map(|s| s.to_string()).collect();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(self.language).unwrap();
+
+        let tree = parser.parse(&state.text, None).unwrap();
+
+        let line = params.text_document_position.position.line as usize;
+        let char = params.text_document_position.position.character as usize;
+
+        let start = tree_sitter::Point {
+            row: line,
+            column: 2,
+        };
+
+        let end = tree_sitter::Point {
+            row: line,
+            column: char - 2,
+        };
+
+        let current = tree
+            .root_node()
+            .named_descendant_for_point_range(start, end)
+            .unwrap()
+            .utf8_text(state.text.as_bytes())
+            .unwrap()
+            .to_string();
+
+        let sequence: Vec<String> = current
+            .split(":")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         let result = state.trie.as_ref().unwrap().predictive_search(&sequence);
         let prefix_length = sequence.len();
 
