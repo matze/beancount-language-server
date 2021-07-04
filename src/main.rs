@@ -92,7 +92,7 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "beancount-language-server".to_string(),
-                version: Some("0.0".to_string()),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
                 // TODO: incremental is probably smarter
