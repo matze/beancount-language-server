@@ -5,13 +5,58 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tree_sitter::Language;
+use tree_sitter::{Language, Node};
 use trie_rs::{Trie, TrieBuilder};
 
 struct State {
     text: String,
     account_trie: Option<Trie<String>>,
     currency_trie: Option<Trie<char>>,
+}
+
+impl State {
+    fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        let result = self.currency_trie.as_ref().unwrap().predictive_search(
+            node.utf8_text(self.text.as_bytes())
+                .unwrap()
+                .chars()
+                .collect::<Vec<char>>(),
+        );
+
+        Ok(Some(CompletionResponse::Array(
+            result
+                .iter()
+                // TODO: enhance with currency info
+                .map(|c| CompletionItem::new_simple(c.iter().collect(), "".to_string()))
+                .collect(),
+        )))
+    }
+
+    fn handle_identifier(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        // This happens for initial completions, i.e. if a character has not triggered
+        // yet. This means this is likely one of the top-level accounts.
+        let identifier = node.utf8_text(self.text.as_bytes()).unwrap();
+
+        for account in ["Expenses", "Assets", "Liabilities", "Equity", "Revenue"] {
+            // Yes, for some stupid reason, the first character is matched as an ERROR
+            // and the identifier starts with the second character ...
+            if account[1..].starts_with(identifier) {
+                return Ok(Some(CompletionResponse::Array(vec![
+                    CompletionItem::new_simple(account.to_string(), "".to_string()),
+                ])));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn handle_node(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        match node.kind() {
+            "currency" => self.handle_currency(node),
+            "identifier" => self.handle_identifier(node),
+            _ => Ok(None),
+        }
+    }
 }
 
 struct Backend {
@@ -179,6 +224,19 @@ impl LanguageServer for Backend {
             .map_or(None, |c| if c == ":" { Some(()) } else { None })
             .is_some();
 
+        self.client
+            .log_message(
+                MessageType::Info,
+                format!(
+                    "{:?}",
+                    tree.root_node()
+                        .named_descendant_for_point_range(start, end)
+                        .unwrap()
+                        .utf8_text(&state.text.as_bytes())
+                ),
+            )
+            .await;
+
         let node = tree
             .root_node()
             .named_descendant_for_point_range(start, end);
@@ -213,25 +271,10 @@ impl LanguageServer for Backend {
                     .collect(),
             )))
         } else {
-            if let Some(node) = node {
-                if node.kind() == "currency" {
-                    let result = state.currency_trie.as_ref().unwrap().predictive_search(
-                        node.utf8_text(state.text.as_bytes())
-                            .unwrap()
-                            .chars()
-                            .collect::<Vec<char>>(),
-                    );
-
-                    return Ok(Some(CompletionResponse::Array(
-                        result
-                            .iter()
-                            .map(|c| CompletionItem::new_simple(c.iter().collect(), "".to_string()))
-                            .collect(),
-                    )));
-                }
+            match node {
+                Some(node) => state.handle_node(&node),
+                None => Ok(None),
             }
-
-            return Ok(None);
         }
     }
 
