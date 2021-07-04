@@ -10,8 +10,8 @@ use trie_rs::{Trie, TrieBuilder};
 
 struct State {
     text: String,
-    trie_builder: TrieBuilder<String>,
-    trie: Option<Trie<String>>,
+    account_trie: Option<Trie<String>>,
+    currency_trie: Option<Trie<char>>,
 }
 
 struct Backend {
@@ -27,8 +27,8 @@ impl Backend {
             language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State {
                 text: "".to_string(),
-                trie_builder: TrieBuilder::new(),
-                trie: None,
+                account_trie: None,
+                currency_trie: None,
             })),
         }
     }
@@ -46,6 +46,8 @@ impl Backend {
         let text = read_to_string(filename).await?;
         let tree = parser.parse(&text, None).unwrap();
         let mut cursor = tree.root_node().walk();
+        let mut account_trie_builder = TrieBuilder::new();
+        let mut currency_trie_builder = TrieBuilder::new();
 
         let transactions = tree
             .root_node()
@@ -66,7 +68,7 @@ impl Backend {
 
                 for posting in postings {
                     for account in posting.children_by_field_name("account", &mut cursor) {
-                        state.trie_builder.push(
+                        account_trie_builder.push(
                             account
                                 .utf8_text(&text.as_bytes())?
                                 .split(":")
@@ -74,12 +76,30 @@ impl Backend {
                                 .collect::<Vec<String>>(),
                         );
                     }
+
+                    let amounts = posting
+                        .children_by_field_name("amount", &mut cursor)
+                        .collect::<Vec<_>>();
+
+                    for amount in amounts {
+                        for currency in amount
+                            .children(&mut cursor)
+                            .filter(|c| c.kind() == "currency")
+                        {
+                            currency_trie_builder.push(
+                                currency
+                                    .utf8_text(&text.as_bytes())?
+                                    .chars()
+                                    .collect::<Vec<char>>(),
+                            );
+                        }
+                    }
                 }
             }
         }
 
-        let trie = state.trie_builder.build();
-        state.trie.insert(trie);
+        state.account_trie.insert(account_trie_builder.build());
+        state.currency_trie.insert(currency_trie_builder.build());
         state.text = text;
 
         Ok(())
@@ -129,18 +149,9 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        if params
-            .context
-            .map_or(None, |c| c.trigger_character)
-            .map_or(None, |c| if c == ":" { Some(()) } else { None })
-            .is_none()
-        {
-            return Ok(None);
-        }
-
         let state = self.state.read().await;
 
-        if state.trie.is_none() {
+        if state.account_trie.is_none() {
             return Ok(None);
         }
 
@@ -154,38 +165,74 @@ impl LanguageServer for Backend {
 
         let start = tree_sitter::Point {
             row: line,
-            column: 2,
+            column: if char == 0 { char } else { char - 1 },
         };
 
         let end = tree_sitter::Point {
             row: line,
-            column: char - 2,
+            column: char,
         };
 
-        let current = tree
+        let is_character_triggered = params
+            .context
+            .map_or(None, |c| c.trigger_character)
+            .map_or(None, |c| if c == ":" { Some(()) } else { None })
+            .is_some();
+
+        let node = tree
             .root_node()
-            .named_descendant_for_point_range(start, end)
-            .unwrap()
-            .utf8_text(state.text.as_bytes())
-            .unwrap()
-            .to_string();
+            .named_descendant_for_point_range(start, end);
 
-        let sequence: Vec<String> = current
-            .split(":")
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
-        let result = state.trie.as_ref().unwrap().predictive_search(&sequence);
-        let prefix_length = sequence.len();
+        if is_character_triggered {
+            let account = node
+                .unwrap()
+                .utf8_text(state.text.as_bytes())
+                .unwrap()
+                .to_string();
 
-        Ok(Some(CompletionResponse::Array(
-            result
-                .iter()
-                .map(|seq| {
-                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                })
-                .collect(),
-        )))
+            let sequence: Vec<String> = account
+                .split(":")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+
+            let result = state
+                .account_trie
+                .as_ref()
+                .unwrap()
+                .predictive_search(&sequence);
+
+            let prefix_length = sequence.len();
+
+            Ok(Some(CompletionResponse::Array(
+                result
+                    .iter()
+                    .map(|seq| {
+                        CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
+                    })
+                    .collect(),
+            )))
+        } else {
+            if let Some(node) = node {
+                if node.kind() == "currency" {
+                    let result = state.currency_trie.as_ref().unwrap().predictive_search(
+                        node.utf8_text(state.text.as_bytes())
+                            .unwrap()
+                            .chars()
+                            .collect::<Vec<char>>(),
+                    );
+
+                    return Ok(Some(CompletionResponse::Array(
+                        result
+                            .iter()
+                            .map(|c| CompletionItem::new_simple(c.iter().collect(), "".to_string()))
+                            .collect(),
+                    )));
+                }
+            }
+
+            return Ok(None);
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
