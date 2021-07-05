@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::sync::Arc;
-use tokio::fs::read_to_string;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{Language, Node};
-use trie_rs::{Trie, TrieBuilder};
+use trie_rs::Trie;
+
+mod beancount;
 
 struct State {
     text: String,
@@ -84,68 +85,12 @@ impl Backend {
     ///
     /// TODO: recursively load included ledgers to retrieve all accounts.
     async fn load_ledgers(&self, filename: &Path) -> anyhow::Result<()> {
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(self.language)?;
-
         let mut state = self.state.write().await;
-        let text = read_to_string(filename).await?;
-        let tree = parser.parse(&text, None).unwrap();
-        let mut cursor = tree.root_node().walk();
-        let mut account_trie_builder = TrieBuilder::new();
-        let mut currency_trie_builder = TrieBuilder::new();
+        let data = beancount::Data::new(filename).await?;
 
-        let transactions = tree
-            .root_node()
-            .children(&mut cursor)
-            .filter(|c| c.kind() == "transaction")
-            .collect::<Vec<_>>();
-
-        for transaction in transactions {
-            let lists = transaction
-                .children_by_field_name("posting_or_kv_list", &mut cursor)
-                .collect::<Vec<_>>();
-
-            for list in lists {
-                let postings = list
-                    .children(&mut cursor)
-                    .filter(|c| c.kind() == "posting")
-                    .collect::<Vec<_>>();
-
-                for posting in postings {
-                    for account in posting.children_by_field_name("account", &mut cursor) {
-                        account_trie_builder.push(
-                            account
-                                .utf8_text(&text.as_bytes())?
-                                .split(":")
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>(),
-                        );
-                    }
-
-                    let amounts = posting
-                        .children_by_field_name("amount", &mut cursor)
-                        .collect::<Vec<_>>();
-
-                    for amount in amounts {
-                        for currency in amount
-                            .children(&mut cursor)
-                            .filter(|c| c.kind() == "currency")
-                        {
-                            currency_trie_builder.push(
-                                currency
-                                    .utf8_text(&text.as_bytes())?
-                                    .chars()
-                                    .collect::<Vec<char>>(),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        state.account_trie.insert(account_trie_builder.build());
-        state.currency_trie.insert(currency_trie_builder.build());
-        state.text = text;
+        state.account_trie.insert(data.account_trie());
+        state.currency_trie.insert(data.currency_trie());
+        state.text = data.text;
 
         Ok(())
     }
