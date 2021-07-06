@@ -1,9 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tokio::fs::read_to_string;
+use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use trie_rs::{Trie, TrieBuilder};
 
 pub struct Data {
+    pub commodities: HashMap<String, Location>,
     accounts: HashSet<Vec<String>>,
     currencies: HashSet<Vec<char>>,
     pub text: String,
@@ -15,6 +17,35 @@ impl Data {
         parser.set_language(tree_sitter_beancount::language())?;
         let tree = parser.parse(&text, None).unwrap();
         let mut cursor = tree.root_node().walk();
+
+        let mut commodities = HashMap::new();
+
+        for commodity in tree
+            .root_node()
+            .children(&mut cursor)
+            .filter(|c| c.kind() == "commodity")
+        {
+            let currency = commodity
+                .child_by_field_name("currency")
+                .unwrap()
+                .utf8_text(&text.as_bytes())
+                .unwrap();
+
+            let start = commodity.start_position();
+            let end = commodity.end_position();
+
+            let range = Range {
+                start: Position { line: start.row as u32, character: start.column as u32 },
+                end: Position { line: end.row as u32, character: end.column as u32 },
+            };
+
+            let location = Location {
+                uri: Url::parse("file:///tmp/main.beancount")?,
+                range,
+            };
+
+            commodities.insert(currency.to_string(), location);
+        }
 
         let mut accounts = HashSet::new();
         let mut currencies = HashSet::new();
@@ -69,6 +100,7 @@ impl Data {
         }
 
         Ok(Self {
+            commodities,
             accounts,
             currencies,
             text,
@@ -116,6 +148,7 @@ mod tests {
         let data = Data::from(ledger.to_string())?;
 
         assert_eq!(data.accounts.len(), 2);
+
         assert!(data
             .accounts
             .contains(&vec!["Expenses".to_string(), "Cash".to_string()]));
@@ -125,6 +158,30 @@ mod tests {
 
         assert_eq!(data.currencies.len(), 1);
         assert!(data.currencies.contains(&vec!['E', 'U', 'R']));
+
+        Ok(())
+    }
+
+    #[test]
+    fn commodity_definition() -> anyhow::Result<()> {
+        let ledger = r#"
+        2015-01-01 commodity USD
+          name: "US Dollar"
+          type: "Currency"
+        2015-01-01 commodity EUR
+          name: "Euro"
+          type: "Currency"
+        "#;
+
+        let data = Data::from(ledger.to_string())?;
+
+        assert_eq!(data.commodities.len(), 2);
+
+        let usd_location = data.commodities.get("USD").unwrap();
+        assert_eq!(usd_location.range.start.line, 1);
+
+        let eur_location = data.commodities.get("EUR").unwrap();
+        assert_eq!(eur_location.range.start.line, 4);
 
         Ok(())
     }

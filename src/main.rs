@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -11,6 +12,7 @@ mod beancount;
 
 struct State {
     text: String,
+    commodities: HashMap<String, Location>,
     account_trie: Option<Trie<String>>,
     currency_trie: Option<Trie<char>>,
 }
@@ -107,6 +109,7 @@ impl Backend {
             language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State {
                 text: "".to_string(),
+                commodities: HashMap::default(),
                 account_trie: None,
                 currency_trie: None,
             })),
@@ -125,6 +128,7 @@ impl Backend {
         state.account_trie.insert(data.account_trie());
         state.currency_trie.insert(data.currency_trie());
         state.text = data.text;
+        state.commodities = data.commodities;
 
         Ok(())
     }
@@ -149,6 +153,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                 }),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -215,6 +220,46 @@ impl LanguageServer for Backend {
                 None => Ok(None),
             }
         }
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let state = self.state.read().await;
+
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(self.language).unwrap();
+
+        let tree = parser.parse(&state.text, None).unwrap();
+
+        let line = params.text_document_position_params.position.line as usize;
+        let char = params.text_document_position_params.position.character as usize;
+
+        let point = tree_sitter::Point {
+            row: line,
+            column: char,
+        };
+
+        if let Some(node) = tree
+            .root_node()
+            .named_descendant_for_point_range(point, point)
+        {
+            if node.kind() == "currency" {
+                let mut location = state
+                    .commodities
+                    .get(node.utf8_text(state.text.as_bytes()).unwrap())
+                    .unwrap()
+                    .clone();
+
+                location.uri = params.text_document_position_params.text_document.uri;
+
+                // Scalar(location) is *not* working with nvim-lsp.
+                return Ok(Some(GotoDefinitionResponse::Array(vec![location])));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
