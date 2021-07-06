@@ -4,8 +4,8 @@ use tokio::fs::read_to_string;
 use trie_rs::{Trie, TrieBuilder};
 
 pub struct Data {
-    pub accounts: HashSet<Vec<String>>,
-    pub currencies: HashSet<Vec<char>>,
+    accounts: HashSet<Vec<String>>,
+    currencies: HashSet<Vec<char>>,
     pub text: String,
 }
 
