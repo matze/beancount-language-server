@@ -16,6 +16,40 @@ struct State {
 }
 
 impl State {
+    fn handle_character_triggered(
+        &self,
+        node: &Option<Node>,
+    ) -> Result<Option<CompletionResponse>> {
+        let account = node
+            .unwrap()
+            .utf8_text(self.text.as_bytes())
+            .unwrap()
+            .to_string();
+
+        let sequence: Vec<String> = account
+            .split(":")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        let result = self
+            .account_trie
+            .as_ref()
+            .unwrap()
+            .predictive_search(&sequence);
+
+        let prefix_length = sequence.len();
+
+        Ok(Some(CompletionResponse::Array(
+            result
+                .iter()
+                .map(|seq| {
+                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
+                })
+                .collect(),
+        )))
+    }
+
     fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         let result = self.currency_trie.as_ref().unwrap().predictive_search(
             node.utf8_text(self.text.as_bytes())
@@ -169,52 +203,12 @@ impl LanguageServer for Backend {
             .map_or(None, |c| if c == ":" { Some(()) } else { None })
             .is_some();
 
-        self.client
-            .log_message(
-                MessageType::Info,
-                format!(
-                    "{:?}",
-                    tree.root_node()
-                        .named_descendant_for_point_range(start, end)
-                        .unwrap()
-                        .utf8_text(&state.text.as_bytes())
-                ),
-            )
-            .await;
-
         let node = tree
             .root_node()
             .named_descendant_for_point_range(start, end);
 
         if is_character_triggered {
-            let account = node
-                .unwrap()
-                .utf8_text(state.text.as_bytes())
-                .unwrap()
-                .to_string();
-
-            let sequence: Vec<String> = account
-                .split(":")
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
-
-            let result = state
-                .account_trie
-                .as_ref()
-                .unwrap()
-                .predictive_search(&sequence);
-
-            let prefix_length = sequence.len();
-
-            Ok(Some(CompletionResponse::Array(
-                result
-                    .iter()
-                    .map(|seq| {
-                        CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                    })
-                    .collect(),
-            )))
+            state.handle_character_triggered(&node)
         } else {
             match node {
                 Some(node) => state.handle_node(&node),
