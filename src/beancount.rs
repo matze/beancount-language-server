@@ -72,7 +72,7 @@ impl Data {
                         accounts.insert(
                             account
                                 .utf8_text(&text.as_bytes())?
-                                .split(":")
+                                .split(':')
                                 .map(|p| p.to_string())
                                 .collect::<Vec<String>>(),
                         );

@@ -29,7 +29,7 @@ impl State {
             .to_string();
 
         let sequence: Vec<String> = account
-            .split(":")
+            .split(':')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
@@ -204,8 +204,8 @@ impl LanguageServer for Backend {
 
         let is_character_triggered = params
             .context
-            .map_or(None, |c| c.trigger_character)
-            .map_or(None, |c| if c == ":" { Some(()) } else { None })
+            .and_then(|c| c.trigger_character)
+            .and_then(|c| if c == ":" { Some(()) } else { None })
             .is_some();
 
         let node = tree
@@ -269,7 +269,7 @@ impl LanguageServer for Backend {
 
 #[tokio::main]
 async fn main() {
-    let (service, messages) = LspService::new(|client| Backend::new(client));
+    let (service, messages) = LspService::new(Backend::new);
 
     Server::new(tokio::io::stdin(), tokio::io::stdout())
         .interleave(messages)
