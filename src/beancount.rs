@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::collections::HashSet;
+use std::path::Path;
 use tokio::fs::read_to_string;
 use trie_rs::{Trie, TrieBuilder};
 
@@ -10,10 +10,9 @@ pub struct Data {
 }
 
 impl Data {
-    pub async fn new(filename: &Path) -> anyhow::Result<Self> {
+    fn from(text: String) -> anyhow::Result<Self> {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
-        let text = read_to_string(filename).await?;
         let tree = parser.parse(&text, None).unwrap();
         let mut cursor = tree.root_node().walk();
 
@@ -72,8 +71,13 @@ impl Data {
         Ok(Self {
             accounts,
             currencies,
-            text
+            text,
         })
+    }
+
+    pub async fn new(filename: &Path) -> anyhow::Result<Self> {
+        let text = read_to_string(filename).await?;
+        Self::from(text)
     }
 
     pub fn account_trie(&self) -> Trie<String> {
@@ -94,5 +98,34 @@ impl Data {
         }
 
         builder.build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse() -> anyhow::Result<()> {
+        let ledger = r#"
+        2021-07-10 "foo" "bar"
+            Expenses:Cash       100.00 EUR
+            Assets:Checking    -100.00 EUR
+        "#;
+
+        let data = Data::from(ledger.to_string())?;
+
+        assert_eq!(data.accounts.len(), 2);
+        assert!(data
+            .accounts
+            .contains(&vec!["Expenses".to_string(), "Cash".to_string()]));
+        assert!(data
+            .accounts
+            .contains(&vec!["Assets".to_string(), "Checking".to_string()]));
+
+        assert_eq!(data.currencies.len(), 1);
+        assert!(data.currencies.contains(&vec!['E', 'U', 'R']));
+
+        Ok(())
     }
 }
