@@ -10,3 +10,6 @@ tokio = { version = "1", features = ["io-std", "fs", "macros", "rt-multi-thread"
 tree-sitter = "0.19"
 tree-sitter-beancount = { git = "https://github.com/polarmutex/tree-sitter-beancount" }
 trie-rs = "0"
+
+[dev-dependencies]
+tempfile = "3"

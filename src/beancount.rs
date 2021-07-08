@@ -12,7 +12,8 @@ pub struct Data {
 }
 
 impl Data {
-    fn from(text: String) -> anyhow::Result<Self> {
+    pub async fn new(filename: &Path) -> anyhow::Result<Self> {
+        let text = read_to_string(filename).await?;
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
         let tree = parser.parse(&text, None).unwrap();
@@ -35,8 +36,14 @@ impl Data {
             let end = commodity.end_position();
 
             let range = Range {
-                start: Position { line: start.row as u32, character: start.column as u32 },
-                end: Position { line: end.row as u32, character: end.column as u32 },
+                start: Position {
+                    line: start.row as u32,
+                    character: start.column as u32,
+                },
+                end: Position {
+                    line: end.row as u32,
+                    character: end.column as u32,
+                },
             };
 
             let location = Location {
@@ -107,11 +114,6 @@ impl Data {
         })
     }
 
-    pub async fn new(filename: &Path) -> anyhow::Result<Self> {
-        let text = read_to_string(filename).await?;
-        Self::from(text)
-    }
-
     pub fn account_trie(&self) -> Trie<String> {
         let mut builder = TrieBuilder::new();
 
@@ -136,16 +138,22 @@ impl Data {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
-    #[test]
-    fn parse() -> anyhow::Result<()> {
-        let ledger = r#"
+    #[tokio::test]
+    async fn parse() -> anyhow::Result<()> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"
         2021-07-10 "foo" "bar"
             Expenses:Cash       100.00 EUR
             Assets:Checking    -100.00 EUR
-        "#;
+        "#
+        )?;
 
-        let data = Data::from(ledger.to_string())?;
+        let data = Data::new(file.path()).await?;
 
         assert_eq!(data.accounts.len(), 2);
 
@@ -162,18 +170,23 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn commodity_definition() -> anyhow::Result<()> {
-        let ledger = r#"
+    #[tokio::test]
+    async fn commodity_definition() -> anyhow::Result<()> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"
         2015-01-01 commodity USD
           name: "US Dollar"
           type: "Currency"
         2015-01-01 commodity EUR
           name: "Euro"
           type: "Currency"
-        "#;
+        "#
+        )?;
 
-        let data = Data::from(ledger.to_string())?;
+        let data = Data::new(file.path()).await?;
 
         assert_eq!(data.commodities.len(), 2);
 
