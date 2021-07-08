@@ -245,12 +245,15 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(point, point)
         {
             if node.kind() == "currency" {
-                let mut location = state
+                let location = state
                     .commodities
-                    .get(node.utf8_text(state.text.as_bytes()).unwrap())
-                    .unwrap()
-                    .clone();
+                    .get(node.utf8_text(state.text.as_bytes()).unwrap());
 
+                if location.is_none() {
+                    return Ok(None);
+                }
+
+                let mut location = location.unwrap().clone();
                 location.uri = params.text_document_position_params.text_document.uri;
 
                 // Scalar(location) is *not* working with nvim-lsp.
