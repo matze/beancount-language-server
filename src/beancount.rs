@@ -52,7 +52,7 @@ impl Data {
             };
 
             let location = Location {
-                uri: Url::parse("file:///tmp/main.beancount")?,
+                uri: (*uri).clone(),
                 range,
             };
 
