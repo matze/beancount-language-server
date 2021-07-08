@@ -1,5 +1,5 @@
+use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use tokio::fs::read_to_string;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use trie_rs::{Trie, TrieBuilder};
@@ -12,8 +12,13 @@ pub struct Data {
 }
 
 impl Data {
-    pub async fn new(filename: &Path) -> anyhow::Result<Self> {
-        let text = read_to_string(filename).await?;
+    pub async fn new(uri: &Url) -> anyhow::Result<Self> {
+        let file_path = uri
+            .to_file_path()
+            .map_err(|err| anyhow!(format!("{:?}", err)))?;
+
+        let text = read_to_string(file_path).await?;
+
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
         let tree = parser.parse(&text, None).unwrap();
@@ -139,6 +144,12 @@ impl Data {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::path::Path;
+    use tower_lsp::lsp_types::Url;
+
+    fn url_from_file_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Url> {
+        Ok(Url::from_file_path(path).map_err(|_| anyhow!("Could not create URI"))?)
+    }
 
     #[tokio::test]
     async fn parse() -> anyhow::Result<()> {
@@ -153,7 +164,7 @@ mod tests {
         "#
         )?;
 
-        let data = Data::new(file.path()).await?;
+        let data = Data::new(&url_from_file_path(file.path())?).await?;
 
         assert_eq!(data.accounts.len(), 2);
 
@@ -186,7 +197,7 @@ mod tests {
         "#
         )?;
 
-        let data = Data::new(file.path()).await?;
+        let data = Data::new(&url_from_file_path(file.path())?).await?;
 
         assert_eq!(data.commodities.len(), 2);
 

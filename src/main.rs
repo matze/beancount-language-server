@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -121,9 +120,9 @@ impl Backend {
     /// Load ledger to search trie and lines.
     ///
     /// TODO: recursively load included ledgers to retrieve all accounts.
-    async fn load_ledgers(&self, filename: &Path) -> anyhow::Result<()> {
+    async fn load_ledgers(&self, uri: &Url) -> anyhow::Result<()> {
         let mut state = self.state.write().await;
-        let data = beancount::Data::new(filename).await?;
+        let data = beancount::Data::new(uri).await?;
 
         state.account_trie.insert(data.account_trie());
         state.currency_trie.insert(data.currency_trie());
@@ -163,7 +162,7 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         if let Err(err) = self
-            .load_ledgers(Path::new(&params.text_document.uri.path()))
+            .load_ledgers(&params.text_document.uri)
             .await
         {
             self.client
