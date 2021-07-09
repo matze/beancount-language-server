@@ -122,7 +122,7 @@ impl Backend {
     /// TODO: recursively load included ledgers to retrieve all accounts.
     async fn load_ledgers(&self, uri: &Url) -> anyhow::Result<()> {
         let mut state = self.state.write().await;
-        let data = beancount::Data::new(uri).await?;
+        let data = beancount::Data::new(uri)?;
 
         state.account_trie.insert(data.account_trie());
         state.currency_trie.insert(data.currency_trie());

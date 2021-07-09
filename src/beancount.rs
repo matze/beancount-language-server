@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
-use tokio::fs::read_to_string;
+use std::fs::read_to_string;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use trie_rs::{Trie, TrieBuilder};
 
@@ -12,12 +12,12 @@ pub struct Data {
 }
 
 impl Data {
-    pub async fn new(uri: &Url) -> anyhow::Result<Self> {
+    pub fn new(uri: &Url) -> anyhow::Result<Self> {
         let file_path = uri
             .to_file_path()
             .map_err(|err| anyhow!(format!("{:?}", err)))?;
 
-        let text = read_to_string(file_path).await?;
+        let text = read_to_string(file_path)?;
 
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
@@ -151,8 +151,8 @@ mod tests {
         Ok(Url::from_file_path(path).map_err(|_| anyhow!("Could not create URI"))?)
     }
 
-    #[tokio::test]
-    async fn parse() -> anyhow::Result<()> {
+    #[test]
+    fn parse() -> anyhow::Result<()> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -164,7 +164,7 @@ mod tests {
         "#
         )?;
 
-        let data = Data::new(&url_from_file_path(file.path())?).await?;
+        let data = Data::new(&url_from_file_path(file.path())?)?;
 
         assert_eq!(data.accounts.len(), 2);
 
@@ -181,8 +181,8 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn commodity_definition() -> anyhow::Result<()> {
+    #[test]
+    fn commodity_definition() -> anyhow::Result<()> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -197,7 +197,7 @@ mod tests {
         "#
         )?;
 
-        let data = Data::new(&url_from_file_path(file.path())?).await?;
+        let data = Data::new(&url_from_file_path(file.path())?)?;
 
         assert_eq!(data.commodities.len(), 2);
 
