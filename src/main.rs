@@ -161,10 +161,7 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _: InitializedParams) {}
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        if let Err(err) = self
-            .load_ledgers(&params.text_document.uri)
-            .await
-        {
+        if let Err(err) = self.load_ledgers(&params.text_document.uri).await {
             self.client
                 .log_message(MessageType::Info, err.to_string())
                 .await;
@@ -249,15 +246,14 @@ impl LanguageServer for Backend {
                     .commodities
                     .get(node.utf8_text(state.text.as_bytes()).unwrap());
 
-                if location.is_none() {
-                    return Ok(None);
+                match location {
+                    None => {
+                        return Ok(None);
+                    }
+                    Some(location) => {
+                        return Ok(Some(GotoDefinitionResponse::Array(vec![location.clone()])));
+                    }
                 }
-
-                let mut location = location.unwrap().clone();
-                location.uri = params.text_document_position_params.text_document.uri;
-
-                // Scalar(location) is *not* working with nvim-lsp.
-                return Ok(Some(GotoDefinitionResponse::Array(vec![location])));
             }
         }
 

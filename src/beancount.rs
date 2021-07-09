@@ -1,9 +1,11 @@
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
 use std::fs::read_to_string;
+use std::path::Path;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use trie_rs::{Trie, TrieBuilder};
 
+#[derive(Default)]
 pub struct Data {
     pub commodities: HashMap<String, Location>,
     accounts: HashSet<Vec<String>>,
@@ -13,11 +15,16 @@ pub struct Data {
 
 impl Data {
     pub fn new(uri: &Url) -> anyhow::Result<Self> {
+        Data::read(uri, Self::default())
+    }
+
+    /// Recursively read ledgers, i.e. those included.
+    fn read(uri: &Url, data: Self) -> anyhow::Result<Self> {
         let file_path = uri
             .to_file_path()
             .map_err(|err| anyhow!(format!("{:?}", err)))?;
 
-        let text = read_to_string(file_path)?;
+        let text = read_to_string(&file_path)?;
 
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
@@ -111,12 +118,64 @@ impl Data {
             }
         }
 
-        Ok(Self {
-            commodities,
-            accounts,
-            currencies,
-            text,
-        })
+        let mut data = data;
+
+        // Descend into included ledgers, ignore all that fail to load.
+        let includes = tree
+            .root_node()
+            .children(&mut cursor)
+            .filter(|c| c.kind() == "include")
+            .collect::<Vec<_>>();
+
+        let include_datas = includes.into_iter().filter_map(|include| {
+            let maybe_node = include
+                .children(&mut cursor)
+                .filter(|c| c.kind() == "string")
+                .next();
+
+            if maybe_node.is_none() {
+                return None;
+            }
+
+            let node = maybe_node.unwrap();
+
+            let filename = node
+                .utf8_text(&text.as_bytes())
+                .unwrap()
+                .trim_start_matches('"')
+                .trim_end_matches('"');
+
+            let path = Path::new(filename);
+
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                if file_path.is_absolute() {
+                    file_path.parent().unwrap().join(path)
+                } else {
+                    path.to_path_buf()
+                }
+            };
+
+            let uri = Url::from_file_path(path).unwrap();
+            Some(Data::read(&uri, Data::default()))
+        });
+
+        for include_data in include_datas {
+            if let Ok(include_data) = include_data {
+                data.commodities
+                    .extend(include_data.commodities.into_iter());
+                data.accounts.extend(include_data.accounts.into_iter());
+                data.currencies.extend(include_data.currencies.into_iter());
+            }
+        }
+
+        data.commodities.extend(commodities.into_iter());
+        data.accounts.extend(accounts.into_iter());
+        data.currencies.extend(currencies.into_iter());
+        data.text = text; // TODO: yeah ...
+
+        Ok(data)
     }
 
     pub fn account_trie(&self) -> Trie<String> {
@@ -143,6 +202,7 @@ impl Data {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::Write;
     use std::path::Path;
     use tower_lsp::lsp_types::Url;
@@ -206,6 +266,43 @@ mod tests {
 
         let eur_location = data.commodities.get("EUR").unwrap();
         assert_eq!(eur_location.range.start.line, 4);
+
+        Ok(())
+    }
+
+    #[test]
+    fn include() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let commodity_file_path = dir.path().join("commodities.beancount");
+        let mut commodity_file = File::create(&commodity_file_path)?;
+
+        write!(
+            commodity_file,
+            r#"
+        2015-01-01 commodity USD
+          name: "US Dollar"
+          type: "Currency"
+        "#
+        )?;
+
+        let main_file_path = dir.path().join("main.beancount");
+        let mut main_file = File::create(&main_file_path)?;
+
+        write!(
+            main_file,
+            r#"
+        include "commodities.beancount"
+
+        2021-07-10 "foo" "bar"
+            Expenses:Cash       100.00 USD
+            Assets:Checking    -100.00 USD
+        "#
+        )?;
+
+        let data = Data::new(&url_from_file_path(&main_file_path)?)?;
+        let usd_location = data.commodities.get("USD").unwrap();
+        assert_eq!(usd_location.uri.path(), commodity_file_path.as_os_str());
 
         Ok(())
     }
