@@ -17,15 +17,8 @@ struct State {
 }
 
 impl State {
-    fn handle_character_triggered(
-        &self,
-        node: &Option<Node>,
-    ) -> Result<Option<CompletionResponse>> {
-        let account = node
-            .unwrap()
-            .utf8_text(self.text.as_bytes())
-            .unwrap()
-            .to_string();
+    fn handle_character_triggered(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        let account = node.utf8_text(self.text.as_bytes()).unwrap().to_string();
 
         let sequence: Vec<String> = account
             .split(':')
@@ -212,13 +205,15 @@ impl LanguageServer for Backend {
             .root_node()
             .named_descendant_for_point_range(start, end);
 
-        if is_character_triggered {
-            state.handle_character_triggered(&node)
-        } else {
-            match node {
-                Some(node) => state.handle_node(&node),
-                None => Ok(None),
+        match node {
+            Some(node) => {
+                if is_character_triggered {
+                    state.handle_character_triggered(&node)
+                } else {
+                    state.handle_node(&node)
+                }
             }
+            None => Ok(None),
         }
     }
 
