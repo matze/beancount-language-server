@@ -33,6 +33,10 @@ impl State {
             .map(|s| s.to_string())
             .collect();
 
+        if sequence.is_empty() {
+            return Ok(None);
+        }
+
         let result = self
             .account_trie
             .as_ref()
