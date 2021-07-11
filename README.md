@@ -1,6 +1,8 @@
 # beancount-language-server
 
-A Language Server Protocol (LSP) for Beancount ledgers.
+[![Rust](https://github.com/matze/beancount-language-server/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/matze/beancount-language-server/actions/workflows/rust.yml)
+
+A Language Server Protocol (LSP) server implementation for Beancount ledgers.
 
 
 ## Installation
