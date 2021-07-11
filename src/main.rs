@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{Language, Node};
@@ -17,46 +17,66 @@ struct State {
     currency_trie: Option<Trie<char>>,
 }
 
-fn account_sequence_from(node: &Node, text: &str) -> Vec<String> {
-    let account = node.utf8_text(text.as_bytes()).unwrap().to_string();
+fn node_text<'a>(node: &'a Node, text: &'a str) -> Result<&'a str> {
+    Ok(node.utf8_text(text.as_bytes()).map_err(|e| Error {
+        code: ErrorCode::ServerError(0),
+        message: e.to_string(),
+        data: None,
+    })?)
+}
 
-    account
+fn account_sequence_from(node: &Node, text: &str) -> Result<Vec<String>> {
+    let account = node_text(node, text)?.to_string();
+
+    Ok(account
         .split(':')
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
-        .collect()
+        .collect())
 }
 
-fn completion_response_from(sequence: &[String], trie: &Trie<String>) -> CompletionResponse {
-        let result = 
-            trie
-            .predictive_search(&sequence);
+fn completion_response_from(
+    sequence: &[String],
+    trie: &Option<Trie<String>>,
+) -> Result<CompletionResponse> {
+    match trie {
+        Some(trie) => {
+            let result = trie.predictive_search(&sequence);
+            let prefix_length = sequence.len();
 
-        let prefix_length = sequence.len();
-
-        CompletionResponse::Array(
-            result
-                .iter()
-                .map(|seq| {
-                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                })
-                .collect(),
-        )
+            Ok(CompletionResponse::Array(
+                result
+                    .iter()
+                    .map(|seq| {
+                        CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
+                    })
+                    .collect(),
+            ))
+        }
+        None => Err(Error {
+            code: ErrorCode::ServerError(0),
+            message: "No trie".to_string(),
+            data: None,
+        }),
+    }
 }
 
 impl State {
     fn handle_character_triggered(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let sequence = account_sequence_from(node, &self.text);
+        let sequence = account_sequence_from(node, &self.text)?;
 
         if sequence.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(completion_response_from(&sequence, self.account_trie.as_ref().unwrap())))
+        Ok(Some(completion_response_from(
+            &sequence,
+            &self.account_trie,
+        )?))
     }
 
     fn handle_account(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let sequence = account_sequence_from(node, &self.text);
+        let sequence = account_sequence_from(node, &self.text)?;
 
         if sequence.len() < 2 {
             return Ok(None);
@@ -65,16 +85,18 @@ impl State {
         // Drop the trailing incomplete account name
         let sequence = &sequence[..sequence.len() - 1];
 
-        Ok(Some(completion_response_from(sequence, self.account_trie.as_ref().unwrap())))
+        Ok(Some(completion_response_from(
+            sequence,
+            &self.account_trie,
+        )?))
     }
 
     fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let result = self.currency_trie.as_ref().unwrap().predictive_search(
-            node.utf8_text(self.text.as_bytes())
-                .unwrap()
-                .chars()
-                .collect::<Vec<char>>(),
-        );
+        let result = self
+            .currency_trie
+            .as_ref()
+            .unwrap()
+            .predictive_search(node_text(node, &self.text)?.chars().collect::<Vec<char>>());
 
         Ok(Some(CompletionResponse::Array(
             result
@@ -88,7 +110,7 @@ impl State {
     fn handle_identifier(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         // This happens for initial completions, i.e. if a character has not triggered
         // yet. This means this is likely one of the top-level accounts.
-        let identifier = node.utf8_text(self.text.as_bytes()).unwrap();
+        let identifier = node_text(node, &self.text)?;
 
         for account in ["Expenses", "Assets", "Liabilities", "Equity", "Revenue"] {
             // Yes, for some stupid reason, the first character is matched as an ERROR
@@ -104,7 +126,6 @@ impl State {
     }
 
     fn handle_node(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        println!("{:?}", node);
         match node.kind() {
             "currency" => self.handle_currency(node),
             "identifier" => self.handle_identifier(node),
@@ -267,9 +288,7 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(point, point)
         {
             if node.kind() == "currency" {
-                let location = state
-                    .commodities
-                    .get(node.utf8_text(state.text.as_bytes()).unwrap());
+                let location = state.commodities.get(node_text(&node, &state.text)?);
 
                 match location {
                     None => {
