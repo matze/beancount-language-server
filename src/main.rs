@@ -49,6 +49,39 @@ impl State {
         )))
     }
 
+    fn handle_account(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        let account = node.utf8_text(self.text.as_bytes()).unwrap().to_string();
+
+        let sequence: Vec<String> = account
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        if sequence.len() < 2 {
+            return Ok(None);
+        }
+
+        let sequence = &sequence[..sequence.len() - 1];
+
+        let result = self
+            .account_trie
+            .as_ref()
+            .unwrap()
+            .predictive_search(&sequence);
+
+        let prefix_length = sequence.len();
+
+        Ok(Some(CompletionResponse::Array(
+            result
+                .iter()
+                .map(|seq| {
+                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
+                })
+                .collect(),
+        )))
+    }
+
     fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         let result = self.currency_trie.as_ref().unwrap().predictive_search(
             node.utf8_text(self.text.as_bytes())
@@ -85,9 +118,11 @@ impl State {
     }
 
     fn handle_node(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        println!("{:?}", node);
         match node.kind() {
             "currency" => self.handle_currency(node),
             "identifier" => self.handle_identifier(node),
+            "account" => self.handle_account(node),
             _ => Ok(None),
         }
     }
@@ -324,7 +359,10 @@ mod tests {
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
-                position: Position { line: 2, character: 5 },
+                position: Position {
+                    line: 2,
+                    character: 5,
+                },
             },
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::Invoked,
@@ -344,7 +382,61 @@ mod tests {
             CompletionResponse::Array(items) => {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].label, "Expenses");
+            }
+            _ => assert!(false),
+        };
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn complete_sub_account() -> anyhow::Result<()> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"
+2021-07-11 "foo" "bar"
+  Expenses:Foo:Bar
+  Expenses:Foo:Qux
+  Expenses:F
+        "#
+        )?;
+
+        let backend = Backend::new_without_client();
+        let uri = url_from_file_path(file.path())?;
+        backend.load_ledgers(&uri).await?;
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 12,
+                },
             },
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::Invoked,
+                trigger_character: None,
+            }),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        let result = backend.completion(params).await?.unwrap();
+
+        match result {
+            CompletionResponse::Array(items) => {
+                for item in items {
+                    assert!(
+                        item.label == "F" || item.label == "Foo:Bar" || item.label == "Foo:Qux"
+                    );
+                }
+            }
             _ => assert!(false),
         };
 
