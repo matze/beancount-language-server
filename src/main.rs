@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -93,7 +94,7 @@ impl State {
 }
 
 struct Backend {
-    client: Client,
+    client: Option<Client>,
     state: Arc<RwLock<State>>,
     language: Language,
 }
@@ -101,7 +102,7 @@ struct Backend {
 impl Backend {
     fn new(client: Client) -> Self {
         Self {
-            client,
+            client: Some(client),
             language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State {
                 text: "".to_string(),
@@ -127,6 +128,12 @@ impl Backend {
         state.commodities = data.commodities;
 
         Ok(())
+    }
+
+    async fn log_message<M: Display>(&self, typ: MessageType, message: M) {
+        if let Some(client) = &self.client {
+            client.log_message(typ, message).await;
+        }
     }
 }
 
@@ -159,9 +166,7 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         if let Err(err) = self.load_ledgers(&params.text_document.uri).await {
-            self.client
-                .log_message(MessageType::Info, err.to_string())
-                .await;
+            self.log_message(MessageType::Info, err.to_string()).await;
         }
     }
 
