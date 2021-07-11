@@ -1,14 +1,37 @@
 use std::collections::HashMap;
+use std::convert::From;
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::jsonrpc::{ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{Language, Node};
 use trie_rs::Trie;
 
 mod beancount;
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("UTF8 conversion error")]
+    Utf8Error(#[from] std::str::Utf8Error),
+
+    #[error("Language error")]
+    LanguageError(#[from] tree_sitter::LanguageError),
+
+    #[error("Trie is empty")]
+    TrieEmpty,
+}
+
+impl From<Error> for tower_lsp::jsonrpc::Error {
+    fn from(error: Error) -> Self {
+        Self {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        }
+    }
+}
 
 struct State {
     text: String,
@@ -18,11 +41,7 @@ struct State {
 }
 
 fn node_text<'a>(node: &'a Node, text: &'a str) -> Result<&'a str> {
-    Ok(node.utf8_text(text.as_bytes()).map_err(|e| Error {
-        code: ErrorCode::ServerError(0),
-        message: e.to_string(),
-        data: None,
-    })?)
+    Ok(node.utf8_text(text.as_bytes()).map_err(Error::from)?)
 }
 
 fn account_sequence_from(node: &Node, text: &str) -> Result<Vec<String>> {
@@ -53,11 +72,7 @@ fn completion_response_from(
                     .collect(),
             ))
         }
-        None => Err(Error {
-            code: ErrorCode::ServerError(0),
-            message: "No trie".to_string(),
-            data: None,
-        }),
+        None => Err(Error::TrieEmpty.into()),
     }
 }
 
@@ -225,7 +240,7 @@ impl LanguageServer for Backend {
         }
 
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(self.language).unwrap();
+        parser.set_language(self.language).map_err(Error::from)?;
 
         let tree = parser.parse(&state.text, None).unwrap();
 
@@ -271,7 +286,7 @@ impl LanguageServer for Backend {
         let state = self.state.read().await;
 
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(self.language).unwrap();
+        parser.set_language(self.language).map_err(Error::from)?;
 
         let tree = parser.parse(&state.text, None).unwrap();
 
