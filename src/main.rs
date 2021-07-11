@@ -17,69 +17,55 @@ struct State {
     currency_trie: Option<Trie<char>>,
 }
 
+fn account_sequence_from(node: &Node, text: &str) -> Vec<String> {
+    let account = node.utf8_text(text.as_bytes()).unwrap().to_string();
+
+    account
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn completion_response_from(sequence: &[String], trie: &Trie<String>) -> CompletionResponse {
+        let result = 
+            trie
+            .predictive_search(&sequence);
+
+        let prefix_length = sequence.len();
+
+        CompletionResponse::Array(
+            result
+                .iter()
+                .map(|seq| {
+                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
+                })
+                .collect(),
+        )
+}
+
 impl State {
     fn handle_character_triggered(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let account = node.utf8_text(self.text.as_bytes()).unwrap().to_string();
-
-        let sequence: Vec<String> = account
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        let sequence = account_sequence_from(node, &self.text);
 
         if sequence.is_empty() {
             return Ok(None);
         }
 
-        let result = self
-            .account_trie
-            .as_ref()
-            .unwrap()
-            .predictive_search(&sequence);
-
-        let prefix_length = sequence.len();
-
-        Ok(Some(CompletionResponse::Array(
-            result
-                .iter()
-                .map(|seq| {
-                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                })
-                .collect(),
-        )))
+        Ok(Some(completion_response_from(&sequence, self.account_trie.as_ref().unwrap())))
     }
 
     fn handle_account(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let account = node.utf8_text(self.text.as_bytes()).unwrap().to_string();
-
-        let sequence: Vec<String> = account
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        let sequence = account_sequence_from(node, &self.text);
 
         if sequence.len() < 2 {
             return Ok(None);
         }
 
+        // Drop the trailing incomplete account name
         let sequence = &sequence[..sequence.len() - 1];
 
-        let result = self
-            .account_trie
-            .as_ref()
-            .unwrap()
-            .predictive_search(&sequence);
-
-        let prefix_length = sequence.len();
-
-        Ok(Some(CompletionResponse::Array(
-            result
-                .iter()
-                .map(|seq| {
-                    CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                })
-                .collect(),
-        )))
+        Ok(Some(completion_response_from(sequence, self.account_trie.as_ref().unwrap())))
     }
 
     fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
