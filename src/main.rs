@@ -278,3 +278,76 @@ async fn main() {
         .serve(service)
         .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+    use std::io::Write;
+    use std::path::Path;
+
+    impl Backend {
+        fn new_without_client() -> Self {
+            Self {
+                client: None,
+                language: tree_sitter_beancount::language(),
+                state: Arc::new(RwLock::new(State {
+                    text: "".to_string(),
+                    commodities: HashMap::default(),
+                    account_trie: None,
+                    currency_trie: None,
+                })),
+            }
+        }
+    }
+
+    fn url_from_file_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Url> {
+        Ok(Url::from_file_path(path).map_err(|_| anyhow!("Could not create URI"))?)
+    }
+
+    #[tokio::test]
+    async fn complete_root_account() -> anyhow::Result<()> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"
+2021-07-11 "foo" "bar"
+  Expe
+        "#
+        )?;
+
+        let backend = Backend::new_without_client();
+        let uri = url_from_file_path(file.path())?;
+        backend.load_ledgers(&uri).await?;
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position { line: 2, character: 5 },
+            },
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::Invoked,
+                trigger_character: None,
+            }),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        let result = backend.completion(params).await?.unwrap();
+
+        match result {
+            CompletionResponse::Array(items) => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].label, "Expenses");
+            },
+            _ => assert!(false),
+        };
+
+        Ok(())
+    }
+}
