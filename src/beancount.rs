@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use crate::Error;
 use std::collections::{HashMap, HashSet};
 use std::fs::read_to_string;
 use std::path::Path;
@@ -14,15 +14,13 @@ pub struct Data {
 }
 
 impl Data {
-    pub fn new(uri: &Url) -> anyhow::Result<Self> {
+    pub fn new(uri: &Url) -> Result<Self, Error> {
         Data::read(uri, Self::default())
     }
 
     /// Recursively read ledgers, i.e. those included.
-    fn read(uri: &Url, data: Self) -> anyhow::Result<Self> {
-        let file_path = uri
-            .to_file_path()
-            .map_err(|err| anyhow!(format!("{:?}", err)))?;
+    fn read(uri: &Url, data: Self) -> Result<Self, Error> {
+        let file_path = uri.to_file_path().map_err(|_| Error::UriToPathConversion)?;
 
         let text = read_to_string(&file_path)?;
 
@@ -207,12 +205,12 @@ mod tests {
     use std::path::Path;
     use tower_lsp::lsp_types::Url;
 
-    fn url_from_file_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Url> {
-        Ok(Url::from_file_path(path).map_err(|_| anyhow!("Could not create URI"))?)
+    fn url_from_file_path<P: AsRef<Path>>(path: P) -> Result<Url, Error> {
+        Ok(Url::from_file_path(path).map_err(|_| Error::UriToPathConversion)?)
     }
 
     #[test]
-    fn parse() -> anyhow::Result<()> {
+    fn parse() -> Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -242,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn commodity_definition() -> anyhow::Result<()> {
+    fn commodity_definition() -> Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -271,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn include() -> anyhow::Result<()> {
+    fn include() -> Result<(), Error> {
         let dir = tempfile::tempdir()?;
 
         let commodity_file_path = dir.path().join("commodities.beancount");

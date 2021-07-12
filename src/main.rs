@@ -12,7 +12,10 @@ use trie_rs::Trie;
 mod beancount;
 
 #[derive(thiserror::Error, Debug)]
-enum Error {
+pub enum Error {
+    #[error("I/O error")]
+    IoError(#[from] std::io::Error),
+
     #[error("UTF8 conversion error")]
     Utf8Error(#[from] std::str::Utf8Error),
 
@@ -21,6 +24,9 @@ enum Error {
 
     #[error("Trie is empty")]
     TrieEmpty,
+
+    #[error("Cannot convert URI to file path")]
+    UriToPathConversion,
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
@@ -175,7 +181,7 @@ impl Backend {
     /// Load ledger to search trie and lines.
     ///
     /// TODO: recursively load included ledgers to retrieve all accounts.
-    async fn load_ledgers(&self, uri: &Url) -> anyhow::Result<()> {
+    async fn load_ledgers(&self, uri: &Url) -> Result<()> {
         let mut state = self.state.write().await;
         let data = beancount::Data::new(uri)?;
 
@@ -337,7 +343,6 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::anyhow;
     use std::io::Write;
     use std::path::Path;
 
@@ -356,12 +361,12 @@ mod tests {
         }
     }
 
-    fn url_from_file_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Url> {
-        Ok(Url::from_file_path(path).map_err(|_| anyhow!("Could not create URI"))?)
+    fn url_from_file_path<P: AsRef<Path>>(path: P) -> std::result::Result<Url, Error> {
+        Ok(Url::from_file_path(path).map_err(|_| Error::UriToPathConversion)?)
     }
 
     #[tokio::test]
-    async fn complete_root_account() -> anyhow::Result<()> {
+    async fn complete_root_account() -> std::result::Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -374,7 +379,7 @@ mod tests {
 
         let backend = Backend::new_without_client();
         let uri = url_from_file_path(file.path())?;
-        backend.load_ledgers(&uri).await?;
+        backend.load_ledgers(&uri).await.unwrap();
 
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
@@ -396,7 +401,7 @@ mod tests {
             },
         };
 
-        let result = backend.completion(params).await?.unwrap();
+        let result = backend.completion(params).await.unwrap().unwrap();
 
         match result {
             CompletionResponse::Array(items) => {
@@ -410,7 +415,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_sub_account() -> anyhow::Result<()> {
+    async fn complete_sub_account() -> std::result::Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
 
         write!(
@@ -425,7 +430,7 @@ mod tests {
 
         let backend = Backend::new_without_client();
         let uri = url_from_file_path(file.path())?;
-        backend.load_ledgers(&uri).await?;
+        backend.load_ledgers(&uri).await.unwrap();
 
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
@@ -447,7 +452,7 @@ mod tests {
             },
         };
 
-        let result = backend.completion(params).await?.unwrap();
+        let result = backend.completion(params).await.unwrap().unwrap();
 
         match result {
             CompletionResponse::Array(items) => {
