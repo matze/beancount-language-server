@@ -220,6 +220,7 @@ impl LanguageServer for Backend {
                     all_commit_characters: None,
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -323,6 +324,32 @@ impl LanguageServer for Backend {
         }
 
         Ok(None)
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        // Lets use brute force and delete everything and add the newly formatted stuff back.
+        let state = self.state.read().await;
+        let formatted = beancount::reformat(&params.text_document.uri)?.unwrap();
+
+        Ok(Some(vec![
+            TextEdit {
+                range: Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: state.text.matches('\n').count() as u32,
+                        character: 0,
+                    },
+                },
+                new_text: "".to_string(),
+            },
+            TextEdit {
+                range: Range::default(),
+                new_text: formatted,
+            },
+        ]))
     }
 
     async fn shutdown(&self) -> Result<()> {
