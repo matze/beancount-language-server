@@ -531,8 +531,7 @@ include "commodities.beancount""#;
 
         let expected = r#"2021-07-10 "foo" "bar"
   Expenses:Cash                               100.00 EUR
-  Assets:Checking                            -100.00 EUR
-"#;
+  Assets:Checking                            -100.00 EUR"#;
         assert_eq!(reformatted, expected);
 
         Ok(())
