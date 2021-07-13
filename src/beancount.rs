@@ -24,6 +24,7 @@ impl Data {
         let file_path = uri.to_file_path().map_err(|_| Error::UriToPathConversion)?;
 
         let text = read_to_string(&file_path)?;
+        let bytes = text.as_bytes();
 
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
@@ -40,7 +41,7 @@ impl Data {
             let currency = commodity
                 .child_by_field_name("currency")
                 .unwrap()
-                .utf8_text(&text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
 
             let start = commodity.start_position();
@@ -89,7 +90,7 @@ impl Data {
                     for account in posting.children_by_field_name("account", &mut cursor) {
                         accounts.insert(
                             account
-                                .utf8_text(&text.as_bytes())?
+                                .utf8_text(bytes)?
                                 .split(':')
                                 .map(|p| p.to_string())
                                 .collect::<Vec<String>>(),
@@ -105,12 +106,8 @@ impl Data {
                             .children(&mut cursor)
                             .filter(|c| c.kind() == "currency")
                         {
-                            currencies.insert(
-                                currency
-                                    .utf8_text(&text.as_bytes())?
-                                    .chars()
-                                    .collect::<Vec<char>>(),
-                            );
+                            currencies
+                                .insert(currency.utf8_text(bytes)?.chars().collect::<Vec<char>>());
                         }
                     }
                 }
@@ -139,7 +136,7 @@ impl Data {
             let node = maybe_node.unwrap();
 
             let filename = node
-                .utf8_text(&text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap()
                 .trim_start_matches('"')
                 .trim_end_matches('"');
@@ -200,6 +197,7 @@ impl Data {
 
 fn reformat_postings(postings: &Node, text: &str) -> String {
     let mut cursor = postings.walk();
+    let bytes = text.as_bytes();
 
     let postings = postings.children(&mut cursor).collect::<Vec<_>>();
 
@@ -209,19 +207,17 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
             let account = p
                 .child_by_field_name("account")
                 .unwrap()
-                .utf8_text(text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
+
             let mut amount_children = p
                 .child_by_field_name("amount")
                 .unwrap()
                 .children(&mut cursor);
+
             assert_eq!(amount_children.len(), 2);
 
-            let number = amount_children
-                .next()
-                .unwrap()
-                .utf8_text(text.as_bytes())
-                .unwrap();
+            let number = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
             // We want to align so that the number period is always at column position 50. Hence we
             // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
@@ -231,11 +227,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
             let denominator = &number[period_position + 1..];
             let width = 50 - 4 - account.len();
 
-            let currency = amount_children
-                .next()
-                .unwrap()
-                .utf8_text(text.as_bytes())
-                .unwrap();
+            let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
             format!(
                 "  {} {:>width$}.{} {}",
@@ -253,6 +245,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
 
 fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
     let node = cursor.node();
+    let bytes = text.as_bytes();
     let end_point = node.range().end_point;
 
     let newlines = |cursor: &TreeCursor| -> String {
@@ -272,13 +265,13 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             let key = node
                 .child_by_field_name("key")
                 .unwrap()
-                .utf8_text(text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
 
             let value = node
                 .child_by_field_name("value")
                 .unwrap()
-                .utf8_text(text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
 
             if cursor.goto_next_sibling() {
@@ -294,7 +287,7 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             }
         }
         "plugin" => {
-            let plugin = node.child(1).unwrap().utf8_text(text.as_bytes()).unwrap();
+            let plugin = node.child(1).unwrap().utf8_text(bytes).unwrap();
 
             if cursor.goto_next_sibling() {
                 format!(
@@ -308,7 +301,7 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             }
         }
         "include" => {
-            let include = node.child(1).unwrap().utf8_text(text.as_bytes()).unwrap();
+            let include = node.child(1).unwrap().utf8_text(bytes).unwrap();
 
             if cursor.goto_next_sibling() {
                 format!(
@@ -325,13 +318,13 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             let date = node
                 .child_by_field_name("date")
                 .unwrap()
-                .utf8_text(text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
 
             let txn = node
                 .child_by_field_name("txn")
                 .unwrap()
-                .utf8_text(text.as_bytes())
+                .utf8_text(bytes)
                 .unwrap();
 
             let txn_strings = node
@@ -341,8 +334,8 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                 .collect::<Vec<_>>();
 
             assert_eq!(txn_strings.len(), 2);
-            let payee = txn_strings[0].utf8_text(text.as_bytes()).unwrap();
-            let narration = txn_strings[1].utf8_text(text.as_bytes()).unwrap();
+            let payee = txn_strings[0].utf8_text(bytes).unwrap();
+            let narration = txn_strings[1].utf8_text(bytes).unwrap();
 
             let posting = node.child_by_field_name("posting_or_kv_list").unwrap();
 
