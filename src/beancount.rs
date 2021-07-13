@@ -243,7 +243,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
     formatted.join("\n")
 }
 
-fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
+fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Error> {
     let node = cursor.node();
     let bytes = text.as_bytes();
     let end_point = node.range().end_point;
@@ -253,26 +253,21 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
         "\n".repeat(current.start_point.row - end_point.row + 1)
     };
 
-    match node.kind() {
+    let formatted = match node.kind() {
         "file" => {
             if cursor.goto_first_child() {
-                reformat_top_level(cursor, text)
+                reformat_top_level(cursor, text)?
             } else {
                 "".to_string()
             }
         }
         "option" => {
-            let key = node
-                .child_by_field_name("key")
-                .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
+            let key = node.child_by_field_name("key").unwrap().utf8_text(bytes)?;
 
             let value = node
                 .child_by_field_name("value")
                 .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
+                .utf8_text(bytes)?;
 
             if cursor.goto_next_sibling() {
                 format!(
@@ -280,52 +275,44 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                     key,
                     value,
                     newlines(cursor),
-                    reformat_top_level(cursor, text)
+                    reformat_top_level(cursor, text)?
                 )
             } else {
                 format!("option {} {}", key, value)
             }
         }
         "plugin" => {
-            let plugin = node.child(1).unwrap().utf8_text(bytes).unwrap();
+            let plugin = node.child(1).unwrap().utf8_text(bytes)?;
 
             if cursor.goto_next_sibling() {
                 format!(
                     "plugin {}{}{}",
                     plugin,
                     newlines(cursor),
-                    reformat_top_level(cursor, text)
+                    reformat_top_level(cursor, text)?
                 )
             } else {
                 format!("plugin {}", plugin)
             }
         }
         "include" => {
-            let include = node.child(1).unwrap().utf8_text(bytes).unwrap();
+            let include = node.child(1).unwrap().utf8_text(bytes)?;
 
             if cursor.goto_next_sibling() {
                 format!(
                     "include {}{}{}",
                     include,
                     newlines(cursor),
-                    reformat_top_level(cursor, text)
+                    reformat_top_level(cursor, text)?
                 )
             } else {
                 format!("include {}", include)
             }
         }
         "transaction" => {
-            let date = node
-                .child_by_field_name("date")
-                .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
+            let date = node.child_by_field_name("date").unwrap().utf8_text(bytes)?;
 
-            let txn = node
-                .child_by_field_name("txn")
-                .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
+            let txn = node.child_by_field_name("txn").unwrap().utf8_text(bytes)?;
 
             let txn_strings = node
                 .child_by_field_name("txn_strings")
@@ -348,7 +335,7 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                     narration,
                     reformat_postings(&posting, text),
                     newlines(cursor),
-                    reformat_top_level(cursor, text)
+                    reformat_top_level(cursor, text)?
                 )
             } else {
                 format!(
@@ -362,7 +349,9 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             }
         }
         _ => "".to_string(),
-    }
+    };
+
+    Ok(formatted)
 }
 
 pub fn reformat(uri: &Url) -> Result<Option<String>, Error> {
@@ -374,7 +363,7 @@ pub fn reformat(uri: &Url) -> Result<Option<String>, Error> {
     let tree = parser.parse(&text, None).unwrap();
     let mut cursor = tree.root_node().walk();
 
-    Ok(Some(reformat_top_level(&mut cursor, &text)))
+    Ok(Some(reformat_top_level(&mut cursor, &text)?))
 }
 
 #[cfg(test)]
