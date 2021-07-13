@@ -253,6 +253,12 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
 
 fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
     let node = cursor.node();
+    let end_point = node.range().end_point;
+
+    let newlines = |cursor: &TreeCursor| -> String {
+        let current = cursor.node().range();
+        "\n".repeat(current.start_point.row - end_point.row + 1)
+    };
 
     match node.kind() {
         "file" => {
@@ -268,6 +274,7 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                 .unwrap()
                 .utf8_text(text.as_bytes())
                 .unwrap();
+
             let value = node
                 .child_by_field_name("value")
                 .unwrap()
@@ -276,9 +283,10 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
 
             if cursor.goto_next_sibling() {
                 format!(
-                    "option {} {}\n{}",
+                    "option {} {}{}{}",
                     key,
                     value,
+                    newlines(cursor),
                     reformat_top_level(cursor, text)
                 )
             } else {
@@ -289,7 +297,12 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             let plugin = node.child(1).unwrap().utf8_text(text.as_bytes()).unwrap();
 
             if cursor.goto_next_sibling() {
-                format!("plugin {}\n{}", plugin, reformat_top_level(cursor, text))
+                format!(
+                    "plugin {}{}{}",
+                    plugin,
+                    newlines(cursor),
+                    reformat_top_level(cursor, text)
+                )
             } else {
                 format!("plugin {}", plugin)
             }
@@ -298,7 +311,12 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             let include = node.child(1).unwrap().utf8_text(text.as_bytes()).unwrap();
 
             if cursor.goto_next_sibling() {
-                format!("include {}\n{}", include, reformat_top_level(cursor, text))
+                format!(
+                    "include {}{}{}",
+                    include,
+                    newlines(cursor),
+                    reformat_top_level(cursor, text)
+                )
             } else {
                 format!("include {}", include)
             }
@@ -324,11 +342,12 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             cursor.goto_next_sibling();
 
             format!(
-                "{} {} {}\n{}\n{}",
+                "{} {} {}\n{}{}{}",
                 date,
                 payee,
                 narration,
                 reformat_postings(&posting, text),
+                newlines(cursor),
                 reformat_top_level(cursor, text)
             )
         }
@@ -463,8 +482,10 @@ mod tests {
         write!(
             file.as_file_mut(),
             r#"option "operating_currency" "EUR"
+
   plugin "beancount.plugins.implicit_prices"
 plugin    "beancount.plugins.check_commodity"
+
 include "commodities.beancount"   "#
         )?;
 
@@ -473,8 +494,10 @@ include "commodities.beancount"   "#
         let reformatted = reformatted.unwrap();
 
         let expected = r#"option "operating_currency" "EUR"
+
 plugin "beancount.plugins.implicit_prices"
 plugin "beancount.plugins.check_commodity"
+
 include "commodities.beancount""#;
 
         assert_eq!(reformatted, expected);
