@@ -328,6 +328,12 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                 .utf8_text(text.as_bytes())
                 .unwrap();
 
+            let txn = node
+                .child_by_field_name("txn")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap();
+
             let txn_strings = node
                 .child_by_field_name("txn_strings")
                 .unwrap()
@@ -342,8 +348,9 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
 
             if cursor.goto_next_sibling() {
                 format!(
-                    "{} {} {}\n{}{}{}",
+                    "{} {} {} {}\n{}{}{}",
                     date,
+                    txn,
                     payee,
                     narration,
                     reformat_postings(&posting, text),
@@ -352,8 +359,9 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
                 )
             } else {
                 format!(
-                    "{} {} {}\n{}",
+                    "{} {} {} {}\n{}",
                     date,
+                    txn,
                     payee,
                     narration,
                     reformat_postings(&posting, text)
@@ -471,7 +479,7 @@ mod tests {
             r#"
         include "commodities.beancount"
 
-        2021-07-10 "foo" "bar"
+        2021-07-10 * "foo" "bar"
             Expenses:Cash       100.00 USD
             Assets:Checking    -100.00 USD
         "#
@@ -519,7 +527,7 @@ include "commodities.beancount""#;
 
         write!(
             file.as_file_mut(),
-            r#"2021-07-10 "foo"     "bar"
+            r#"2021-07-10  ! "foo"     "bar"
  Expenses:Cash             100.00 EUR
    Assets:Checking    -100.00 EUR
         "#
@@ -529,7 +537,7 @@ include "commodities.beancount""#;
         assert!(reformatted.is_some());
         let reformatted = reformatted.unwrap();
 
-        let expected = r#"2021-07-10 "foo" "bar"
+        let expected = r#"2021-07-10 ! "foo" "bar"
   Expenses:Cash                               100.00 EUR
   Assets:Checking                            -100.00 EUR"#;
         assert_eq!(reformatted, expected);
