@@ -339,17 +339,26 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> String {
             let narration = txn_strings[1].utf8_text(text.as_bytes()).unwrap();
 
             let posting = node.child_by_field_name("posting_or_kv_list").unwrap();
-            cursor.goto_next_sibling();
 
-            format!(
-                "{} {} {}\n{}{}{}",
-                date,
-                payee,
-                narration,
-                reformat_postings(&posting, text),
-                newlines(cursor),
-                reformat_top_level(cursor, text)
-            )
+            if cursor.goto_next_sibling() {
+                format!(
+                    "{} {} {}\n{}{}{}",
+                    date,
+                    payee,
+                    narration,
+                    reformat_postings(&posting, text),
+                    newlines(cursor),
+                    reformat_top_level(cursor, text)
+                )
+            } else {
+                format!(
+                    "{} {} {}\n{}",
+                    date,
+                    payee,
+                    narration,
+                    reformat_postings(&posting, text)
+                )
+            }
         }
         _ => "".to_string(),
     }
