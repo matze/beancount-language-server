@@ -338,32 +338,31 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
                 .children(&mut node.walk())
                 .collect::<Vec<_>>();
 
-            assert_eq!(txn_strings.len(), 2);
-
             let payee = txn_strings[0].utf8_text(bytes).unwrap();
-            let narration = txn_strings[1].utf8_text(bytes).unwrap();
+
+            let first_line = match txn_strings.len() {
+                1 => {
+                    format!("{} {} {}", date, txn, payee)
+                }
+                2 => {
+                    let narration = txn_strings[1].utf8_text(bytes).unwrap();
+                    format!("{} {} {} {}", date, txn, payee, narration)
+                }
+                _ => return Err(Error::UnexpectedFormat),
+            };
+
             let posting = node.child_by_field_name("posting_or_kv_list").unwrap();
 
             if cursor.goto_next_sibling() {
                 format!(
-                    "{} {} {} {}\n{}{}{}",
-                    date,
-                    txn,
-                    payee,
-                    narration,
+                    "{}\n{}{}{}",
+                    first_line,
                     reformat_postings(&posting, text),
                     newlines(cursor),
                     reformat_top_level(cursor, text)?
                 )
             } else {
-                format!(
-                    "{} {} {} {}\n{}",
-                    date,
-                    txn,
-                    payee,
-                    narration,
-                    reformat_postings(&posting, text)
-                )
+                format!("{}\n{}", first_line, reformat_postings(&posting, text))
             }
         }
         _ => "".to_string(),
@@ -542,6 +541,30 @@ include "commodities.beancount"
         let reformatted = reformatted.unwrap();
 
         let expected = r#"2021-07-10 ! "foo" "bar"
+  Expenses:Cash                               100.00 EUR
+  Assets:Checking                            -100.00 EUR"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+    #[test]
+    fn reformat_transaction_without_narration() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"2021-07-10  * "foo"
+ Expenses:Cash             100.00 EUR
+   Assets:Checking    -100.00 EUR
+        "#
+        )?;
+
+        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
+        assert!(reformatted.is_some());
+        let reformatted = reformatted.unwrap();
+
+        let expected = r#"2021-07-10 * "foo"
   Expenses:Cash                               100.00 EUR
   Assets:Checking                            -100.00 EUR"#;
 

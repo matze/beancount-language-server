@@ -27,6 +27,9 @@ pub enum Error {
 
     #[error("Cannot convert URI to file path")]
     UriToPathConversion,
+
+    #[error("Unexpected format error")]
+    UnexpectedFormat,
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
