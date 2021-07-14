@@ -224,6 +224,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
             assert_eq!(amount_children.len(), 2);
 
             let number = amount_children.next().unwrap().utf8_text(bytes).unwrap();
+            let width = 50 - 4 - account.len();
 
             // We want to align so that the number period is always at column position 50. Hence we
             // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
@@ -232,20 +233,24 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
                 Some(position) => {
                     let numerator = &number[..position];
                     let denominator = &number[position + 1..];
-                    let width = 50 - 4 - account.len();
                     format!("{:>width$}.{}", numerator, denominator, width = width)
                 }
-                None => number.to_string(),
+                None => format!("{:>width$}", number, width = width)
             };
 
             let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
+
+            let cost = match p.child_by_field_name("cost_spec") {
+                Some(cost) => format!(" {}", cost.utf8_text(bytes).unwrap()),
+                None => "".to_string(),
+            };
 
             let comment = match p.child_by_field_name("comment") {
                 Some(comment) => format!("  {}", comment.utf8_text(bytes).unwrap()),
                 None => "".to_string(),
             };
 
-            format!("  {} {} {}{}", account, amount, currency, comment,)
+            format!("  {} {} {}{}{}", account, amount, currency, cost, comment)
         })
         .collect::<Vec<_>>();
 
@@ -629,6 +634,31 @@ include "commodities.beancount"
         let expected = r#"2021-07-10 * "foo" "bar"
   Expenses:Cash                               100.00 EUR  ; foo
   Assets:Checking                            -100.00 EUR  ; bar"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reformat_security() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#" 2021-07-10  * "foo"     "bar"
+ Assets:Cash             100.00 EUR
+   Assets:AAPL    1 AAPL {{100.00 EUR}}
+        "#
+        )?;
+
+        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
+        assert!(reformatted.is_some());
+        let reformatted = reformatted.unwrap();
+
+        let expected = r#"2021-07-10 * "foo" "bar"
+  Assets:Cash                                 100.00 EUR
+  Assets:AAPL                                   1 AAPL {100.00 EUR}"#;
 
         assert_eq!(reformatted, expected);
 
