@@ -228,10 +228,15 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
             // We want to align so that the number period is always at column position 50. Hence we
             // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
             // length of account.
-            let period_position = number.find('.').unwrap();
-            let numerator = &number[..period_position];
-            let denominator = &number[period_position + 1..];
-            let width = 50 - 4 - account.len();
+            let amount = match number.find('.') {
+                Some(position) => {
+                    let numerator = &number[..position];
+                    let denominator = &number[position + 1..];
+                    let width = 50 - 4 - account.len();
+                    format!("{:>width$}.{}", numerator, denominator, width = width)
+                }
+                None => number.to_string(),
+            };
 
             let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
@@ -240,15 +245,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
                 None => "".to_string(),
             };
 
-            format!(
-                "  {} {:>width$}.{} {}{}",
-                account,
-                numerator,
-                denominator,
-                currency,
-                comment,
-                width = width
-            )
+            format!("  {} {} {}{}", account, amount, currency, comment,)
         })
         .collect::<Vec<_>>();
 
