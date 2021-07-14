@@ -14,8 +14,15 @@ pub struct Data {
     pub text: String,
 }
 
-fn node_text_by_field_name<'a>(node: &'a Node, field_name: &'a str, bytes: &'a [u8]) -> Result<&'a str, Error> {
-    Ok(node.child_by_field_name(field_name).unwrap().utf8_text(bytes)?)
+fn node_text_by_field_name<'a>(
+    node: &'a Node,
+    field_name: &'a str,
+    bytes: &'a [u8],
+) -> Result<&'a str, Error> {
+    Ok(node
+        .child_by_field_name(field_name)
+        .unwrap()
+        .utf8_text(bytes)?)
 }
 
 impl Data {

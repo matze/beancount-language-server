@@ -337,19 +337,12 @@ impl LanguageServer for Backend {
         Ok(Some(vec![
             TextEdit {
                 range: Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
+                    start: Position::default(),
                     end: Position {
                         line: state.text.matches('\n').count() as u32,
                         character: 0,
                     },
                 },
-                new_text: "".to_string(),
-            },
-            TextEdit {
-                range: Range::default(),
                 new_text: formatted,
             },
         ]))
