@@ -235,7 +235,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
                     let denominator = &number[position + 1..];
                     format!("{:>width$}.{}", numerator, denominator, width = width)
                 }
-                None => format!("{:>width$}", number, width = width)
+                None => format!("{:>width$}", number, width = width),
             };
 
             let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
@@ -402,6 +402,10 @@ mod tests {
         Ok(Url::from_file_path(path).map_err(|_| Error::UriToPathConversion)?)
     }
 
+    fn reformat<P: AsRef<Path>>(path: P) -> Result<String, Error> {
+        Ok(super::reformat(&url_from_file_path(path)?)?.ok_or_else(|| Error::UnexpectedFormat)?)
+    }
+
     #[test]
     fn parse() -> Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
@@ -514,10 +518,7 @@ include "commodities.beancount"
   2015-01-02 open Expenses:Foo:Bar "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"option "operating_currency" "EUR"
 
 plugin "beancount.plugins.implicit_prices"
@@ -543,10 +544,7 @@ include "commodities.beancount"
         "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 ! "foo" "bar"
   Expenses:Cash                               100.00 EUR
   Assets:Checking                            -100.00 EUR"#;
@@ -567,10 +565,7 @@ include "commodities.beancount"
         "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo"
   Expenses:Cash                               100.00 EUR
   Assets:Checking                            -100.00 EUR"#;
@@ -597,10 +592,7 @@ include "commodities.beancount"
         "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"option "operating_currency" "EUR"
 
 2021-07-10 * "foo" "bar"
@@ -627,10 +619,7 @@ include "commodities.beancount"
         "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo" "bar"
   Expenses:Cash                               100.00 EUR  ; foo
   Assets:Checking                            -100.00 EUR  ; bar"#;
@@ -652,10 +641,7 @@ include "commodities.beancount"
         "#
         )?;
 
-        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
-        assert!(reformatted.is_some());
-        let reformatted = reformatted.unwrap();
-
+        let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo" "bar"
   Assets:Cash                                 100.00 EUR
   Assets:AAPL                                   1 AAPL {100.00 EUR}"#;
