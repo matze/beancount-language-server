@@ -235,12 +235,18 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
 
             let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
+            let comment = match p.child_by_field_name("comment") {
+                Some(comment) => format!("  {}", comment.utf8_text(bytes).unwrap()),
+                None => "".to_string(),
+            };
+
             format!(
-                "  {} {:>width$}.{} {}",
+                "  {} {:>width$}.{} {}{}",
                 account,
                 numerator,
                 denominator,
                 currency,
+                comment,
                 width = width
             )
         })
@@ -601,6 +607,31 @@ include "commodities.beancount"
 2021-07-11 ! "foo" "bar"
   Expenses:Cash                                99.00 EUR
   Assets:Checking                             -99.00 EUR"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reformat_comment() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#" 2021-07-10  * "foo"     "bar"
+ Expenses:Cash             100.00 EUR ; foo
+   Assets:Checking    -100.00 EUR       ; bar
+        "#
+        )?;
+
+        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
+        assert!(reformatted.is_some());
+        let reformatted = reformatted.unwrap();
+
+        let expected = r#"2021-07-10 * "foo" "bar"
+  Expenses:Cash                               100.00 EUR  ; foo
+  Assets:Checking                            -100.00 EUR  ; bar"#;
 
         assert_eq!(reformatted, expected);
 
