@@ -311,19 +311,18 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
         }
         "transaction" => {
             let date = node.child_by_field_name("date").unwrap().utf8_text(bytes)?;
-
             let txn = node.child_by_field_name("txn").unwrap().utf8_text(bytes)?;
 
             let txn_strings = node
                 .child_by_field_name("txn_strings")
                 .unwrap()
-                .children(cursor)
+                .children(&mut node.walk())
                 .collect::<Vec<_>>();
 
             assert_eq!(txn_strings.len(), 2);
+
             let payee = txn_strings[0].utf8_text(bytes).unwrap();
             let narration = txn_strings[1].utf8_text(bytes).unwrap();
-
             let posting = node.child_by_field_name("posting_or_kv_list").unwrap();
 
             if cursor.goto_next_sibling() {
@@ -522,6 +521,42 @@ include "commodities.beancount""#;
         let expected = r#"2021-07-10 ! "foo" "bar"
   Expenses:Cash                               100.00 EUR
   Assets:Checking                            -100.00 EUR"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reformat_multiple() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#" option   "operating_currency" "EUR"
+
+2021-07-10  * "foo"     "bar"
+ Expenses:Cash             100.00 EUR
+   Assets:Checking    -100.00 EUR
+2021-07-11  ! "foo"   "bar"
+ Expenses:Cash              99.00 EUR
+   Assets:Checking    -99.00 EUR
+        "#
+        )?;
+
+        let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
+        assert!(reformatted.is_some());
+        let reformatted = reformatted.unwrap();
+
+        let expected = r#"option "operating_currency" "EUR"
+
+2021-07-10 * "foo" "bar"
+  Expenses:Cash                               100.00 EUR
+  Assets:Checking                            -100.00 EUR
+2021-07-11 ! "foo" "bar"
+  Expenses:Cash                                99.00 EUR
+  Assets:Checking                             -99.00 EUR"#;
+
         assert_eq!(reformatted, expected);
 
         Ok(())
