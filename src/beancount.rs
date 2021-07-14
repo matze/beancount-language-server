@@ -295,6 +295,25 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
                 format!("plugin {}", plugin)
             }
         }
+        "open" => {
+            let date = node.child_by_field_name("date").unwrap().utf8_text(bytes)?;
+            let account = node
+                .child_by_field_name("account")
+                .unwrap()
+                .utf8_text(bytes)?;
+
+            if cursor.goto_next_sibling() {
+                format!(
+                    "{} open {}{}{}",
+                    date,
+                    account,
+                    newlines(cursor),
+                    reformat_top_level(cursor, text)?
+                )
+            } else {
+                format!("{} open {}", date, account)
+            }
+        }
         "include" => {
             let include = node.child(1).unwrap().utf8_text(bytes)?;
 
@@ -484,7 +503,9 @@ mod tests {
   plugin "beancount.plugins.implicit_prices"
 plugin    "beancount.plugins.check_commodity"
 
-include "commodities.beancount"   "#
+include "commodities.beancount"  
+
+  2015-01-02 open Expenses:Foo:Bar "#
         )?;
 
         let reformatted = super::reformat(&url_from_file_path(file.path())?)?;
@@ -496,7 +517,9 @@ include "commodities.beancount"   "#
 plugin "beancount.plugins.implicit_prices"
 plugin "beancount.plugins.check_commodity"
 
-include "commodities.beancount""#;
+include "commodities.beancount"
+
+2015-01-02 open Expenses:Foo:Bar"#;
 
         assert_eq!(reformatted, expected);
         Ok(())
