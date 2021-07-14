@@ -14,6 +14,10 @@ pub struct Data {
     pub text: String,
 }
 
+fn node_text_by_field_name<'a>(node: &'a Node, field_name: &'a str, bytes: &'a [u8]) -> Result<&'a str, Error> {
+    Ok(node.child_by_field_name(field_name).unwrap().utf8_text(bytes)?)
+}
+
 impl Data {
     pub fn new(uri: &Url) -> Result<Self, Error> {
         Data::read(uri, Self::default())
@@ -38,12 +42,7 @@ impl Data {
             .children(&mut cursor)
             .filter(|c| c.kind() == "commodity")
         {
-            let currency = commodity
-                .child_by_field_name("currency")
-                .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
-
+            let currency = node_text_by_field_name(&commodity, "currency", bytes)?;
             let start = commodity.start_position();
             let end = commodity.end_position();
 
@@ -262,12 +261,8 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
             }
         }
         "option" => {
-            let key = node.child_by_field_name("key").unwrap().utf8_text(bytes)?;
-
-            let value = node
-                .child_by_field_name("value")
-                .unwrap()
-                .utf8_text(bytes)?;
+            let key = node_text_by_field_name(&node, "key", bytes)?;
+            let value = node_text_by_field_name(&node, "value", bytes)?;
 
             if cursor.goto_next_sibling() {
                 format!(
@@ -296,11 +291,8 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
             }
         }
         "open" => {
-            let date = node.child_by_field_name("date").unwrap().utf8_text(bytes)?;
-            let account = node
-                .child_by_field_name("account")
-                .unwrap()
-                .utf8_text(bytes)?;
+            let date = node_text_by_field_name(&node, "date", bytes)?;
+            let account = node_text_by_field_name(&node, "account", bytes)?;
 
             if cursor.goto_next_sibling() {
                 format!(
@@ -329,8 +321,8 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
             }
         }
         "transaction" => {
-            let date = node.child_by_field_name("date").unwrap().utf8_text(bytes)?;
-            let txn = node.child_by_field_name("txn").unwrap().utf8_text(bytes)?;
+            let date = node_text_by_field_name(&node, "date", bytes)?;
+            let txn = node_text_by_field_name(&node, "txn", bytes)?;
 
             let txn_strings = node
                 .child_by_field_name("txn_strings")
