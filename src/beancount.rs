@@ -216,29 +216,38 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
                 .utf8_text(bytes)
                 .unwrap();
 
-            let mut amount_children = p
-                .child_by_field_name("amount")
-                .unwrap()
-                .children(&mut cursor);
+            let amount = {
+                match p.child_by_field_name("amount") {
+                    Some(amount) => {
+                        let mut amount_children = amount.children(&mut cursor);
 
-            assert_eq!(amount_children.len(), 2);
+                        assert_eq!(amount_children.len(), 2);
 
-            let number = amount_children.next().unwrap().utf8_text(bytes).unwrap();
-            let width = 50 - 4 - account.len();
+                        let number = amount_children.next().unwrap().utf8_text(bytes).unwrap();
+                        let width = 50 - 4 - account.len();
+                        let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
-            // We want to align so that the number period is always at column position 50. Hence we
-            // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
-            // length of account.
-            let amount = match number.find('.') {
-                Some(position) => {
-                    let numerator = &number[..position];
-                    let denominator = &number[position + 1..];
-                    format!("{:>width$}.{}", numerator, denominator, width = width)
+                        // We want to align so that the number period is always at column position 50. Hence we
+                        // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
+                        // length of account.
+                        match number.find('.') {
+                            Some(position) => {
+                                let numerator = &number[..position];
+                                let denominator = &number[position + 1..];
+                                format!(
+                                    " {:>width$}.{} {}",
+                                    numerator,
+                                    denominator,
+                                    currency,
+                                    width = width
+                                )
+                            }
+                            None => format!(" {:>width$} {}", number, currency, width = width),
+                        }
+                    }
+                    None => "".to_string(),
                 }
-                None => format!("{:>width$}", number, width = width),
             };
-
-            let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
 
             let cost = match p.child_by_field_name("cost_spec") {
                 Some(cost) => format!(" {}", cost.utf8_text(bytes).unwrap()),
@@ -250,7 +259,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
                 None => "".to_string(),
             };
 
-            format!("  {} {} {}{}{}", account, amount, currency, cost, comment)
+            format!("  {}{}{}{}", account, amount, cost, comment)
         })
         .collect::<Vec<_>>();
 
@@ -645,6 +654,28 @@ include "commodities.beancount"
         let expected = r#"2021-07-10 * "foo" "bar"
   Assets:Cash                                 100.00 EUR
   Assets:AAPL                                   1 AAPL {100.00 EUR}"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reformat_no_amount() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#" 2021-07-10  * "foo"     "bar"
+ Expenses:Cash             100.00 EUR ; foo
+   Assets:Checking
+        "#
+        )?;
+
+        let reformatted = reformat(file.path())?;
+        let expected = r#"2021-07-10 * "foo" "bar"
+  Expenses:Cash                               100.00 EUR  ; foo
+  Assets:Checking"#;
 
         assert_eq!(reformatted, expected);
 
