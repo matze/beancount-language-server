@@ -204,8 +204,20 @@ impl Data {
 fn reformat_postings(postings: &Node, text: &str) -> String {
     let mut cursor = postings.walk();
     let bytes = text.as_bytes();
+    println!("{:?}", postings.kind());
 
-    let postings = postings.children(&mut cursor).collect::<Vec<_>>();
+    let comments = postings
+        .children(&mut cursor)
+        .filter(|p| p.kind() == "comment")
+        .map(|p| {
+            format!("  {}\n", p.utf8_text(bytes).unwrap())
+        })
+        .collect::<Vec<_>>();
+
+    let postings = postings
+        .children(&mut cursor)
+        .filter(|p| p.kind() == "posting")
+        .collect::<Vec<_>>();
 
     let formatted = postings
         .into_iter()
@@ -263,7 +275,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
         })
         .collect::<Vec<_>>();
 
-    formatted.join("\n")
+    format!("{}{}", comments.join("\n"), formatted.join("\n"))
 }
 
 fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Error> {
@@ -562,6 +574,31 @@ include "commodities.beancount"
 
         Ok(())
     }
+
+    #[test]
+    fn reformat_transaction_with_comment() -> Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"2021-07-10  ! "foo"     "bar"
+    ; some comment
+ Expenses:Cash             100.00 EUR
+   Assets:Checking    -100.00 EUR
+        "#
+        )?;
+
+        let reformatted = reformat(file.path())?;
+        let expected = r#"2021-07-10 ! "foo" "bar"
+  ; some comment
+  Expenses:Cash                               100.00 EUR
+  Assets:Checking                            -100.00 EUR"#;
+
+        assert_eq!(reformatted, expected);
+
+        Ok(())
+    }
+
     #[test]
     fn reformat_transaction_without_narration() -> Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
