@@ -15,7 +15,7 @@ and copy it to your path, e.g.
 
     cp target/release/beancount-language-server ~/.local/bin
 
-### Neovim LSP
+### Neovim LSP setup
 
 The official nvim-lspconfig plugin is set up for the [Javascript-based language
 server](https://github.com/polarmutex/beancount-language-server), so for now you
@@ -44,3 +44,10 @@ configs["beancount_rs"] = {
 local nvim_lsp = require('lspconfig')
 nvim_lsp.beancount_rs.setup({})
 ```
+
+
+## License
+
+beancount-language-server is licensed under the MIT license, see
+[LICENSE](https://github.com/matze/beancount-language-server/blob/master/LICENSE)
+for more information.
