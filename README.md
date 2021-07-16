@@ -5,6 +5,13 @@
 A Language Server Protocol (LSP) server implementation for Beancount ledgers.
 
 
+## Features
+
+* **Completion**: accounts
+* **Formatting**
+* **Definitions**: commodities
+
+
 ## Installation
 
 Build the binary
