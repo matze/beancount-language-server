@@ -441,10 +441,9 @@ mod tests {
 
         write!(
             file.as_file_mut(),
-            r#"
-        2021-07-10 "foo" "bar"
-            Expenses:Cash       100.00 EUR
-            Assets:Checking    -100.00 EUR
+            r#"2021-07-10 "foo" "bar"
+  Expenses:Cash       100.00 EUR
+  Assets:Checking    -100.00 EUR
         "#
         )?;
 
@@ -474,14 +473,12 @@ mod tests {
 
         write!(
             file.as_file_mut(),
-            r#"
-        2015-01-01 commodity USD
-          name: "US Dollar"
-          type: "Currency"
-        2015-01-01 commodity EUR
-          name: "Euro"
-          type: "Currency"
-        "#
+            r#"2015-01-01 commodity USD
+  name: "US Dollar"
+  type: "Currency"
+2015-01-01 commodity EUR
+  name: "Euro"
+  type: "Currency""#
         )?;
 
         let data = Data::new(&url_from_file_path(file.path())?)?;
@@ -489,10 +486,10 @@ mod tests {
         assert_eq!(data.commodities.len(), 2);
 
         let usd_location = data.commodities.get("USD").unwrap();
-        assert_eq!(usd_location.range.start.line, 1);
+        assert_eq!(usd_location.range.start.line, 0);
 
         let eur_location = data.commodities.get("EUR").unwrap();
-        assert_eq!(eur_location.range.start.line, 4);
+        assert_eq!(eur_location.range.start.line, 3);
 
         Ok(())
     }
@@ -506,11 +503,9 @@ mod tests {
 
         write!(
             commodity_file,
-            r#"
-        2015-01-01 commodity USD
-          name: "US Dollar"
-          type: "Currency"
-        "#
+            r#"2015-01-01 commodity USD
+  name: "US Dollar"
+  type: "Currency""#
         )?;
 
         let main_file_path = dir.path().join("main.beancount");
@@ -518,12 +513,11 @@ mod tests {
 
         write!(
             main_file,
-            r#"
-        include "commodities.beancount"
+            r#"include "commodities.beancount"
 
-        2021-07-10 * "foo" "bar"
-            Expenses:Cash       100.00 USD
-            Assets:Checking    -100.00 USD
+2021-07-10 * "foo" "bar"
+  Expenses:Cash       100.00 USD
+  Assets:Checking    -100.00 USD
         "#
         )?;
 

@@ -410,8 +410,7 @@ mod tests {
 
         write!(
             file.as_file_mut(),
-            r#"
-2021-07-11 "foo" "bar"
+            r#"2021-07-11 "foo" "bar"
   Expe
         "#
         )?;
@@ -424,7 +423,7 @@ mod tests {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: Position {
-                    line: 2,
+                    line: 1,
                     character: 5,
                 },
             },
@@ -459,8 +458,7 @@ mod tests {
 
         write!(
             file.as_file_mut(),
-            r#"
-2021-07-11 "foo" "bar"
+            r#"2021-07-11 "foo" "bar"
   Expenses:Foo:Bar
   Expenses:Foo:Qux
   Expenses:F
@@ -475,7 +473,7 @@ mod tests {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: Position {
-                    line: 4,
+                    line: 3,
                     character: 12,
                 },
             },
