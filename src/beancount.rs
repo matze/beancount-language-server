@@ -11,7 +11,7 @@ pub struct Data {
     pub commodities: HashMap<String, Location>,
     accounts: HashSet<Vec<String>>,
     currencies: HashSet<Vec<char>>,
-    payees: HashSet<String>,
+    pub payees: HashSet<String>,
     pub text: String,
 }
 

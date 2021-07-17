@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::From;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -47,6 +47,7 @@ struct State {
     commodities: HashMap<String, Location>,
     account_trie: Option<Trie<String>>,
     currency_trie: Option<Trie<char>>,
+    payees: HashSet<String>,
 }
 
 fn node_text<'a>(node: &'a Node, text: &'a str) -> Result<&'a str> {
@@ -133,7 +134,7 @@ impl State {
 
     fn handle_identifier(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         // This happens for initial completions, i.e. if a character has not triggered
-        // yet. This means this is likely one of the top-level accounts.
+        // yet. This means this is likely one of the top-level accounts or a payee.
         let identifier = node_text(node, &self.text)?;
 
         for account in ["Expenses", "Assets", "Liabilities", "Equity", "Revenue"] {
@@ -146,7 +147,19 @@ impl State {
             }
         }
 
-        Ok(None)
+        // We are not a top-level account, so cross fingers and hope we meant a payee
+        let candidates = self
+            .payees
+            .iter()
+            .filter(|p| p.starts_with(identifier))
+            .map(|p| CompletionItem::new_simple(p.to_string(), "".to_string()))
+            .collect::<Vec<_>>();
+
+        if candidates.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(CompletionResponse::Array(candidates)))
+        }
     }
 
     fn handle_node(&self, node: &Node) -> Result<Option<CompletionResponse>> {
@@ -175,6 +188,7 @@ impl Backend {
                 commodities: HashMap::default(),
                 account_trie: None,
                 currency_trie: None,
+                payees: HashSet::default(),
             })),
         }
     }
@@ -192,6 +206,7 @@ impl Backend {
         state.currency_trie.insert(data.currency_trie());
         state.text = data.text;
         state.commodities = data.commodities;
+        state.payees = data.payees;
 
         Ok(())
     }
@@ -243,6 +258,8 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.log_message(MessageType::Info, format!("{:?}", params))
+            .await;
         let state = self.state.read().await;
 
         if state.account_trie.is_none() {
@@ -334,18 +351,16 @@ impl LanguageServer for Backend {
         let state = self.state.read().await;
         let formatted = beancount::reformat(&params.text_document.uri)?.unwrap();
 
-        Ok(Some(vec![
-            TextEdit {
-                range: Range {
-                    start: Position::default(),
-                    end: Position {
-                        line: state.text.matches('\n').count() as u32,
-                        character: 0,
-                    },
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: Position::default(),
+                end: Position {
+                    line: state.text.matches('\n').count() as u32,
+                    character: 0,
                 },
-                new_text: formatted,
             },
-        ]))
+            new_text: formatted,
+        }]))
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -379,6 +394,7 @@ mod tests {
                     commodities: HashMap::default(),
                     account_trie: None,
                     currency_trie: None,
+                    payees: HashSet::default(),
                 })),
             }
         }
@@ -483,6 +499,62 @@ mod tests {
                     assert!(
                         item.label == "F" || item.label == "Foo:Bar" || item.label == "Foo:Qux"
                     );
+                }
+            }
+            _ => assert!(false),
+        };
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn complete_payee() -> std::result::Result<(), Error> {
+        let mut file = tempfile::NamedTempFile::new()?;
+
+        write!(
+            file.as_file_mut(),
+            r#"2021-07-11 "foo" "bar"
+  Expenses:Foo:Bar
+2021-07-11 "faa" "bar"
+  Expenses:Foo:Bar
+2021-07-11 "gaa" "bar"
+  Expenses:Foo:Bar
+2021-07-11 f
+        "#
+        )?;
+
+        let backend = Backend::new_without_client();
+        let uri = url_from_file_path(file.path())?;
+        backend.load_ledgers(&uri).await.unwrap();
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 12,
+                },
+            },
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::Invoked,
+                trigger_character: None,
+            }),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        let result = backend.completion(params).await.unwrap().unwrap();
+
+        match result {
+            CompletionResponse::Array(items) => {
+                assert_eq!(items.len(), 2);
+
+                for item in items {
+                    assert!(item.label == "foo" || item.label == "faa");
                 }
             }
             _ => assert!(false),
