@@ -213,7 +213,6 @@ impl Data {
 fn reformat_postings(postings: &Node, text: &str) -> String {
     let mut cursor = postings.walk();
     let bytes = text.as_bytes();
-    println!("{:?}", postings.kind());
 
     let comments = postings
         .children(&mut cursor)
