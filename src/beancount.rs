@@ -11,6 +11,7 @@ pub struct Data {
     pub commodities: HashMap<String, Location>,
     accounts: HashSet<Vec<String>>,
     currencies: HashSet<Vec<char>>,
+    payees: HashSet<String>,
     pub text: String,
 }
 
@@ -74,6 +75,7 @@ impl Data {
 
         let mut accounts = HashSet::new();
         let mut currencies = HashSet::new();
+        let mut payees = HashSet::new();
 
         let transactions = tree
             .root_node()
@@ -82,6 +84,12 @@ impl Data {
             .collect::<Vec<_>>();
 
         for transaction in transactions {
+            if let Some(txn_strings) = transaction.child_by_field_name("txn_strings") {
+                if let Some(payee) = txn_strings.children(&mut cursor).next() {
+                    payees.insert(payee.utf8_text(bytes)?.trim_end_matches('"').trim_start_matches('"').to_string());
+                }
+            }
+
             let lists = transaction
                 .children_by_field_name("posting_or_kv_list", &mut cursor)
                 .collect::<Vec<_>>();
@@ -175,6 +183,7 @@ impl Data {
         data.commodities.extend(commodities.into_iter());
         data.accounts.extend(accounts.into_iter());
         data.currencies.extend(currencies.into_iter());
+        data.payees.extend(payees.into_iter());
         data.text = text; // TODO: yeah ...
 
         Ok(data)
@@ -453,6 +462,9 @@ mod tests {
 
         assert_eq!(data.currencies.len(), 1);
         assert!(data.currencies.contains(&vec!['E', 'U', 'R']));
+
+        assert_eq!(data.payees.len(), 1);
+        assert!(data.payees.contains("foo"));
 
         Ok(())
     }
