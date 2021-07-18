@@ -196,8 +196,6 @@ impl Backend {
 
 impl Backend {
     /// Load ledger to search trie and lines.
-    ///
-    /// TODO: recursively load included ledgers to retrieve all accounts.
     async fn load_ledgers(&self, uri: &Url) -> Result<()> {
         let mut state = self.state.write().await;
         let data = beancount::Data::new(uri)?;
@@ -258,8 +256,6 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.log_message(MessageType::Info, format!("{:?}", params))
-            .await;
         let state = self.state.read().await;
 
         if state.account_trie.is_none() {
