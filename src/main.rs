@@ -147,11 +147,20 @@ impl State {
             }
         }
 
-        // We are not a top-level account, so cross fingers and hope we meant a payee
+        Ok(None)
+    }
+
+    fn handle_error(&self, node: &Node) -> Result<Option<CompletionResponse>> {
+        let identifier = node_text(node, &self.text)?;
+
+        // Probably, hopefully starts with " and ends with some weird character yet to be
+        // identified.
+        let prefix = &identifier[1..identifier.len() - 1];
+
         let candidates = self
             .payees
             .iter()
-            .filter(|p| p.starts_with(identifier))
+            .filter(|p| p.starts_with(prefix))
             .map(|p| CompletionItem::new_simple(p.to_string(), "".to_string()))
             .collect::<Vec<_>>();
 
@@ -167,6 +176,7 @@ impl State {
             "currency" => self.handle_currency(node),
             "identifier" => self.handle_identifier(node),
             "account" => self.handle_account(node),
+            "ERROR" => self.handle_error(node),
             _ => Ok(None),
         }
     }
@@ -256,6 +266,9 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.log_message(MessageType::Info, format!("{:?}", params))
+            .await;
+
         let state = self.state.read().await;
 
         if state.account_trie.is_none() {
