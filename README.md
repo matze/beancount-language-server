@@ -7,8 +7,8 @@ A Language Server Protocol (LSP) server implementation for Beancount ledgers.
 
 ## Features
 
-* **Completion**: accounts
-* **Formatting**
+* **Completion**: accounts, payees
+* **Formatting**: full file
 * **Definitions**: commodities
 
 
