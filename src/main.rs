@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::convert::From;
 use std::env;
 use std::fmt::Display;
@@ -44,12 +43,9 @@ impl From<Error> for tower_lsp::jsonrpc::Error {
     }
 }
 
+#[derive(Default)]
 struct State {
-    text: String,
-    commodities: HashMap<String, Location>,
-    accounts: HashSet<String>,
-    currencies: HashSet<String>,
-    payees: HashSet<String>,
+    data: beancount::Data,
 }
 
 fn node_text<'a>(node: &'a Node, text: &'a str) -> Result<&'a str> {
@@ -63,7 +59,7 @@ fn item_from_str<T: Into<String>>(label: T) -> CompletionItem {
 impl State {
     fn complete_account(&self) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(
-            self.accounts
+            self.data.accounts
                 .iter()
                 .map(item_from_str)
                 .collect(),
@@ -72,7 +68,7 @@ impl State {
 
     fn complete_currency(&self) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(
-            self.currencies
+            self.data.currencies
                 .iter()
                 .map(item_from_str)
                 .collect(),
@@ -82,7 +78,7 @@ impl State {
     fn handle_identifier(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         // This happens for initial completions, i.e. if a character has not triggered
         // yet. This means this is likely one of the top-level accounts or a payee.
-        let identifier = node_text(node, &self.text)?;
+        let identifier = node_text(node, &self.data.text)?;
 
         for account in ["Expenses", "Assets", "Liabilities", "Equity", "Revenue"] {
             // Yes, for some stupid reason, the first character is matched as an ERROR
@@ -98,14 +94,14 @@ impl State {
     }
 
     fn handle_error(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let identifier = node_text(node, &self.text)?;
+        let identifier = node_text(node, &self.data.text)?;
 
         // Probably, hopefully starts with " and ends with some weird character yet to be
         // identified.
         let prefix = &identifier[1..].trim_end();
 
         let candidates = self
-            .payees
+            .data.payees
             .iter()
             .filter(|p| p.starts_with(prefix))
             .map(item_from_str)
@@ -156,27 +152,14 @@ impl Backend {
             check_cmd,
             check_re: regex::Regex::new(r"^[^:]+:(\d+):\s*(.*)$").unwrap(),
             language: tree_sitter_beancount::language(),
-            state: Arc::new(RwLock::new(State {
-                text: "".to_string(),
-                commodities: HashMap::default(),
-                accounts: HashSet::default(),
-                currencies: HashSet::default(),
-                payees: HashSet::default(),
-            })),
+            state: Arc::new(RwLock::new(State::default())),
         }
     }
 
     /// Load ledger to search trie and lines.
     async fn load_ledgers(&self, uri: &Url) -> Result<()> {
         let mut state = self.state.write().await;
-        let data = beancount::Data::new(uri)?;
-
-        state.text = data.text;
-        state.commodities = data.commodities;
-        state.payees = data.payees;
-        state.accounts = data.accounts;
-        state.currencies = data.currencies;
-
+        state.data = beancount::Data::new(uri)?;
         Ok(())
     }
 
@@ -279,7 +262,7 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let mut state = self.state.write().await;
-        state.text = params.content_changes[0].text.clone();
+        state.data.text = params.content_changes[0].text.clone();
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -292,7 +275,7 @@ impl LanguageServer for Backend {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(self.language).map_err(Error::from)?;
 
-        let tree = parser.parse(&state.text, None).unwrap();
+        let tree = parser.parse(&state.data.text, None).unwrap();
 
         let line = params.text_document_position.position.line as usize;
         let char = params.text_document_position.position.character as usize;
@@ -338,7 +321,7 @@ impl LanguageServer for Backend {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(self.language).map_err(Error::from)?;
 
-        let tree = parser.parse(&state.text, None).unwrap();
+        let tree = parser.parse(&state.data.text, None).unwrap();
 
         let line = params.text_document_position_params.position.line as usize;
         let char = params.text_document_position_params.position.character as usize;
@@ -353,7 +336,7 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(point, point)
         {
             if node.kind() == "currency" {
-                let location = state.commodities.get(node_text(&node, &state.text)?);
+                let location = state.data.commodities.get(node_text(&node, &state.data.text)?);
 
                 match location {
                     None => {
@@ -378,7 +361,7 @@ impl LanguageServer for Backend {
             range: Range {
                 start: Position::default(),
                 end: Position {
-                    line: state.text.matches('\n').count() as u32,
+                    line: state.data.text.matches('\n').count() as u32,
                     character: 0,
                 },
             },
@@ -414,13 +397,7 @@ mod tests {
                 check_cmd: None,
                 check_re: regex::Regex::new(r"").unwrap(),
                 language: tree_sitter_beancount::language(),
-                state: Arc::new(RwLock::new(State {
-                    text: "".to_string(),
-                    commodities: HashMap::default(),
-                    accounts: HashSet::default(),
-                    currencies: HashSet::default(),
-                    payees: HashSet::default(),
-                })),
+                state: Arc::new(RwLock::new(State::default())),
             }
         }
     }
