@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::From;
+use std::env;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::process::Command;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::{ErrorCode, Result};
 use tower_lsp::lsp_types::*;
@@ -186,14 +189,30 @@ impl State {
 
 struct Backend {
     client: Option<Client>,
+    check_cmd: Option<PathBuf>,
+    check_re: regex::Regex,
     state: Arc<RwLock<State>>,
     language: Language,
 }
 
 impl Backend {
     fn new(client: Client) -> Self {
+        let check_cmd = env::var_os("PATH").and_then(|paths| {
+            env::split_paths(&paths).find_map(|p| {
+                let full_path = p.join("bean-check");
+
+                if full_path.is_file() {
+                    Some(full_path)
+                } else {
+                    None
+                }
+            })
+        });
+
         Self {
             client: Some(client),
+            check_cmd,
+            check_re: regex::Regex::new(r"^[^:]+:(\d+):\s*(.*)$").unwrap(),
             language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State {
                 text: "".to_string(),
@@ -225,6 +244,60 @@ impl Backend {
         if let Some(client) = &self.client {
             client.log_message(typ, message).await;
         }
+    }
+
+    async fn check(&self, uri: Url) {
+        let client = match &self.client {
+            Some(client) => client,
+            None => {
+                return;
+            }
+        };
+
+        let check_cmd = match &self.check_cmd {
+            Some(cmd) => cmd,
+            None => {
+                return;
+            }
+        };
+
+        let output = match Command::new(check_cmd).arg(uri.path()).output().await {
+            Ok(output) => output,
+            Err(_) => {
+                return;
+            }
+        };
+
+        let diags = if !output.status.success() {
+            let output = std::str::from_utf8(&output.stderr).unwrap();
+
+            output
+                .lines()
+                .filter_map(|line| {
+                    if let Some(caps) = self.check_re.captures(line) {
+                        let position = Position {
+                            line: caps[1].parse::<u32>().unwrap().saturating_sub(1),
+                            character: 0,
+                        };
+
+                        Some(Diagnostic {
+                            range: Range {
+                                start: position,
+                                end: position,
+                            },
+                            message: caps[2].trim().to_string(),
+                            ..Diagnostic::default()
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+
+        client.publish_diagnostics(uri, diags, None).await;
     }
 }
 
@@ -260,6 +333,8 @@ impl LanguageServer for Backend {
         if let Err(err) = self.load_ledgers(&params.text_document.uri).await {
             self.log_message(MessageType::Info, err.to_string()).await;
         }
+
+        self.check(params.text_document.uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -267,10 +342,11 @@ impl LanguageServer for Backend {
         state.text = params.content_changes[0].text.clone();
     }
 
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.log_message(MessageType::Info, format!("{:?}", params))
-            .await;
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.check(params.text_document.uri).await;
+    }
 
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let state = self.state.read().await;
 
         if state.account_trie.is_none() {
@@ -399,6 +475,8 @@ mod tests {
         fn new_without_client() -> Self {
             Self {
                 client: None,
+                check_cmd: None,
+                check_re: regex::Regex::new(r"").unwrap(),
                 language: tree_sitter_beancount::language(),
                 state: Arc::new(RwLock::new(State {
                     text: "".to_string(),

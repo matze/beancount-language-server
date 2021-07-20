@@ -10,6 +10,7 @@ A Language Server Protocol (LSP) server implementation for Beancount ledgers.
 * **Completion**: accounts, payees
 * **Formatting**: full file
 * **Definitions**: commodities
+* **Diagnostics**: if `bean-check` is on `$PATH`
 
 
 ## Installation
