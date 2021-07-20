@@ -165,9 +165,7 @@ impl Backend {
             })),
         }
     }
-}
 
-impl Backend {
     /// Load ledger to search trie and lines.
     async fn load_ledgers(&self, uri: &Url) -> Result<()> {
         let mut state = self.state.write().await;

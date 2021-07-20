@@ -136,16 +136,9 @@ impl Data {
             .collect::<Vec<_>>();
 
         let include_datas = includes.into_iter().filter_map(|include| {
-            let maybe_node = include
+            let node = include
                 .children(&mut cursor)
-                .filter(|c| c.kind() == "string")
-                .next();
-
-            if maybe_node.is_none() {
-                return None;
-            }
-
-            let node = maybe_node.unwrap();
+                .find(|c| c.kind() == "string")?;
 
             let filename = node
                 .utf8_text(bytes)
@@ -157,25 +150,21 @@ impl Data {
 
             let path = if path.is_absolute() {
                 path.to_path_buf()
+            } else if file_path.is_absolute() {
+                file_path.parent().unwrap().join(path)
             } else {
-                if file_path.is_absolute() {
-                    file_path.parent().unwrap().join(path)
-                } else {
-                    path.to_path_buf()
-                }
+                path.to_path_buf()
             };
 
             let uri = Url::from_file_path(path).unwrap();
             Some(Data::read(&uri, Data::default()))
         });
 
-        for include_data in include_datas {
-            if let Ok(include_data) = include_data {
-                data.commodities
-                    .extend(include_data.commodities.into_iter());
-                data.accounts.extend(include_data.accounts.into_iter());
-                data.currencies.extend(include_data.currencies.into_iter());
-            }
+        for include_data in include_datas.flatten() {
+            data.commodities
+                .extend(include_data.commodities.into_iter());
+            data.accounts.extend(include_data.accounts.into_iter());
+            data.currencies.extend(include_data.currencies.into_iter());
         }
 
         data.commodities.extend(commodities.into_iter());
