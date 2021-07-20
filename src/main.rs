@@ -54,6 +54,10 @@ fn node_text<'a>(node: &'a Node, text: &'a str) -> Result<&'a str> {
     Ok(node.utf8_text(text.as_bytes()).map_err(Error::from)?)
 }
 
+fn item_from_str<T: Into<String>>(label: T) -> CompletionItem {
+    CompletionItem::new_simple(label.into(), "".to_string())
+}
+
 fn account_sequence_from(node: &Node, text: &str) -> Result<Vec<String>> {
     let account = node_text(node, text)?.to_string();
 
@@ -76,9 +80,7 @@ fn completion_response_from(
             Ok(CompletionResponse::Array(
                 result
                     .iter()
-                    .map(|seq| {
-                        CompletionItem::new_simple(seq[prefix_length..].join(":"), "".to_string())
-                    })
+                    .map(|seq| item_from_str(&seq[prefix_length..].join(":")))
                     .collect(),
             ))
         }
@@ -127,7 +129,7 @@ impl State {
             result
                 .iter()
                 // TODO: enhance with currency info
-                .map(|c| CompletionItem::new_simple(c.iter().collect(), "".to_string()))
+                .map(|c| item_from_str(c.iter().collect::<String>()))
                 .collect(),
         )))
     }
@@ -141,9 +143,9 @@ impl State {
             // Yes, for some stupid reason, the first character is matched as an ERROR
             // and the identifier starts with the second character ...
             if account[1..].starts_with(identifier) {
-                return Ok(Some(CompletionResponse::Array(vec![
-                    CompletionItem::new_simple(account.to_string(), "".to_string()),
-                ])));
+                return Ok(Some(CompletionResponse::Array(vec![item_from_str(
+                    account,
+                )])));
             }
         }
 
@@ -161,7 +163,7 @@ impl State {
             .payees
             .iter()
             .filter(|p| p.starts_with(prefix))
-            .map(|p| CompletionItem::new_simple(p.to_string(), "".to_string()))
+            .map(item_from_str)
             .collect::<Vec<_>>();
 
         if candidates.is_empty() {
