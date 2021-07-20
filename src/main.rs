@@ -10,7 +10,6 @@ use tower_lsp::jsonrpc::{ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{Language, Node};
-use trie_rs::Trie;
 
 mod beancount;
 
@@ -48,8 +47,8 @@ impl From<Error> for tower_lsp::jsonrpc::Error {
 struct State {
     text: String,
     commodities: HashMap<String, Location>,
-    account_trie: Option<Trie<String>>,
-    currency_trie: Option<Trie<char>>,
+    accounts: HashSet<String>,
+    currencies: HashSet<String>,
     payees: HashSet<String>,
 }
 
@@ -61,78 +60,21 @@ fn item_from_str<T: Into<String>>(label: T) -> CompletionItem {
     CompletionItem::new_simple(label.into(), "".to_string())
 }
 
-fn account_sequence_from(node: &Node, text: &str) -> Result<Vec<String>> {
-    let account = node_text(node, text)?.to_string();
-
-    Ok(account
-        .split(':')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect())
-}
-
-fn completion_response_from(
-    sequence: &[String],
-    trie: &Option<Trie<String>>,
-) -> Result<CompletionResponse> {
-    match trie {
-        Some(trie) => {
-            let result = trie.predictive_search(&sequence);
-            let prefix_length = sequence.len();
-
-            Ok(CompletionResponse::Array(
-                result
-                    .iter()
-                    .map(|seq| item_from_str(&seq[prefix_length..].join(":")))
-                    .collect(),
-            ))
-        }
-        None => Err(Error::TrieEmpty.into()),
-    }
-}
-
 impl State {
-    fn handle_character_triggered(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let sequence = account_sequence_from(node, &self.text)?;
-
-        if sequence.is_empty() {
-            return Ok(None);
-        }
-
-        Ok(Some(completion_response_from(
-            &sequence,
-            &self.account_trie,
-        )?))
-    }
-
-    fn handle_account(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let sequence = account_sequence_from(node, &self.text)?;
-
-        if sequence.len() < 2 {
-            return Ok(None);
-        }
-
-        // Drop the trailing incomplete account name
-        let sequence = &sequence[..sequence.len() - 1];
-
-        Ok(Some(completion_response_from(
-            sequence,
-            &self.account_trie,
-        )?))
-    }
-
-    fn handle_currency(&self, node: &Node) -> Result<Option<CompletionResponse>> {
-        let result = self
-            .currency_trie
-            .as_ref()
-            .unwrap()
-            .predictive_search(node_text(node, &self.text)?.chars().collect::<Vec<char>>());
-
+    fn complete_account(&self) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(
-            result
+            self.accounts
                 .iter()
-                // TODO: enhance with currency info
-                .map(|c| item_from_str(c.iter().collect::<String>()))
+                .map(item_from_str)
+                .collect(),
+        )))
+    }
+
+    fn complete_currency(&self) -> Result<Option<CompletionResponse>> {
+        Ok(Some(CompletionResponse::Array(
+            self.currencies
+                .iter()
+                .map(item_from_str)
                 .collect(),
         )))
     }
@@ -178,9 +120,9 @@ impl State {
 
     fn handle_node(&self, node: &Node) -> Result<Option<CompletionResponse>> {
         match node.kind() {
-            "currency" => self.handle_currency(node),
+            "currency" => self.complete_currency(),
             "identifier" => self.handle_identifier(node),
-            "account" => self.handle_account(node),
+            "account" => self.complete_account(),
             "ERROR" => self.handle_error(node),
             _ => Ok(None),
         }
@@ -217,8 +159,8 @@ impl Backend {
             state: Arc::new(RwLock::new(State {
                 text: "".to_string(),
                 commodities: HashMap::default(),
-                account_trie: None,
-                currency_trie: None,
+                accounts: HashSet::default(),
+                currencies: HashSet::default(),
                 payees: HashSet::default(),
             })),
         }
@@ -231,11 +173,11 @@ impl Backend {
         let mut state = self.state.write().await;
         let data = beancount::Data::new(uri)?;
 
-        state.account_trie.insert(data.account_trie());
-        state.currency_trie.insert(data.currency_trie());
         state.text = data.text;
         state.commodities = data.commodities;
         state.payees = data.payees;
+        state.accounts = data.accounts;
+        state.currencies = data.currencies;
 
         Ok(())
     }
@@ -349,10 +291,6 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let state = self.state.read().await;
 
-        if state.account_trie.is_none() {
-            return Ok(None);
-        }
-
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(self.language).map_err(Error::from)?;
 
@@ -384,7 +322,7 @@ impl LanguageServer for Backend {
         match node {
             Some(node) => {
                 if is_character_triggered {
-                    state.handle_character_triggered(&node)
+                    state.complete_account()
                 } else {
                     state.handle_node(&node)
                 }
@@ -481,8 +419,8 @@ mod tests {
                 state: Arc::new(RwLock::new(State {
                     text: "".to_string(),
                     commodities: HashMap::default(),
-                    account_trie: None,
-                    currency_trie: None,
+                    accounts: HashSet::default(),
+                    currencies: HashSet::default(),
                     payees: HashSet::default(),
                 })),
             }
@@ -534,59 +472,6 @@ mod tests {
             CompletionResponse::Array(items) => {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].label, "Expenses");
-            }
-            _ => assert!(false),
-        };
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn complete_sub_account() -> std::result::Result<(), Error> {
-        let mut file = tempfile::NamedTempFile::new()?;
-
-        write!(
-            file.as_file_mut(),
-            r#"2021-07-11 "foo" "bar"
-  Expenses:Foo:Bar
-  Expenses:Foo:Qux
-  Expenses:F
-        "#
-        )?;
-
-        let backend = Backend::new_without_client();
-        let uri = url_from_file_path(file.path())?;
-        backend.load_ledgers(&uri).await.unwrap();
-
-        let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 3,
-                    character: 12,
-                },
-            },
-            context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::Invoked,
-                trigger_character: None,
-            }),
-            work_done_progress_params: WorkDoneProgressParams {
-                work_done_token: None,
-            },
-            partial_result_params: PartialResultParams {
-                partial_result_token: None,
-            },
-        };
-
-        let result = backend.completion(params).await.unwrap().unwrap();
-
-        match result {
-            CompletionResponse::Array(items) => {
-                for item in items {
-                    assert!(
-                        item.label == "F" || item.label == "Foo:Bar" || item.label == "Foo:Qux"
-                    );
-                }
             }
             _ => assert!(false),
         };

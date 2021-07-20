@@ -4,13 +4,12 @@ use std::fs::read_to_string;
 use std::path::Path;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use tree_sitter::{Node, TreeCursor};
-use trie_rs::{Trie, TrieBuilder};
 
 #[derive(Default)]
 pub struct Data {
     pub commodities: HashMap<String, Location>,
-    accounts: HashSet<Vec<String>>,
-    currencies: HashSet<Vec<char>>,
+    pub accounts: HashSet<String>,
+    pub currencies: HashSet<String>,
     pub payees: HashSet<String>,
     pub text: String,
 }
@@ -86,7 +85,13 @@ impl Data {
         for transaction in transactions {
             if let Some(txn_strings) = transaction.child_by_field_name("txn_strings") {
                 if let Some(payee) = txn_strings.children(&mut cursor).next() {
-                    payees.insert(payee.utf8_text(bytes)?.trim_end_matches('"').trim_start_matches('"').to_string());
+                    payees.insert(
+                        payee
+                            .utf8_text(bytes)?
+                            .trim_end_matches('"')
+                            .trim_start_matches('"')
+                            .to_string(),
+                    );
                 }
             }
 
@@ -102,13 +107,7 @@ impl Data {
 
                 for posting in postings {
                     for account in posting.children_by_field_name("account", &mut cursor) {
-                        accounts.insert(
-                            account
-                                .utf8_text(bytes)?
-                                .split(':')
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>(),
-                        );
+                        accounts.insert(account.utf8_text(bytes)?.to_string());
                     }
 
                     let amounts = posting
@@ -120,8 +119,7 @@ impl Data {
                             .children(&mut cursor)
                             .filter(|c| c.kind() == "currency")
                         {
-                            currencies
-                                .insert(currency.utf8_text(bytes)?.chars().collect::<Vec<char>>());
+                            currencies.insert(currency.utf8_text(bytes)?.to_string());
                         }
                     }
                 }
@@ -188,26 +186,6 @@ impl Data {
 
         Ok(data)
     }
-
-    pub fn account_trie(&self) -> Trie<String> {
-        let mut builder = TrieBuilder::new();
-
-        for account in &self.accounts {
-            builder.push(account);
-        }
-
-        builder.build()
-    }
-
-    pub fn currency_trie(&self) -> Trie<char> {
-        let mut builder = TrieBuilder::new();
-
-        for currency in &self.currencies {
-            builder.push(currency);
-        }
-
-        builder.build()
-    }
 }
 
 fn reformat_postings(postings: &Node, text: &str) -> String {
@@ -217,9 +195,7 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
     let comments = postings
         .children(&mut cursor)
         .filter(|p| p.kind() == "comment")
-        .map(|p| {
-            format!("  {}\n", p.utf8_text(bytes).unwrap())
-        })
+        .map(|p| format!("  {}\n", p.utf8_text(bytes).unwrap()))
         .collect::<Vec<_>>();
 
     let postings = postings
@@ -451,15 +427,11 @@ mod tests {
 
         assert_eq!(data.accounts.len(), 2);
 
-        assert!(data
-            .accounts
-            .contains(&vec!["Expenses".to_string(), "Cash".to_string()]));
-        assert!(data
-            .accounts
-            .contains(&vec!["Assets".to_string(), "Checking".to_string()]));
+        assert!(data.accounts.contains("Expenses:Cash"));
+        assert!(data.accounts.contains("Assets:Checking"));
 
         assert_eq!(data.currencies.len(), 1);
-        assert!(data.currencies.contains(&vec!['E', 'U', 'R']));
+        assert!(data.currencies.contains("EUR"));
 
         assert_eq!(data.payees.len(), 1);
         assert!(data.payees.contains("foo"));
