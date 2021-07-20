@@ -155,7 +155,7 @@ impl State {
 
         // Probably, hopefully starts with " and ends with some weird character yet to be
         // identified.
-        let prefix = &identifier[1..identifier.len() - 1];
+        let prefix = &identifier[1..].trim_end();
 
         let candidates = self
             .payees
@@ -526,7 +526,7 @@ mod tests {
   Expenses:Foo:Bar
 2021-07-11 "gaa" "bar"
   Expenses:Foo:Bar
-2021-07-11 f
+2021-07-11 "f
         "#
         )?;
 
