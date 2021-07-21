@@ -20,6 +20,9 @@ pub enum Error {
     #[error("UTF8 conversion error")]
     Utf8Error(#[from] std::str::Utf8Error),
 
+    #[error("ParseInt error")]
+    ParseIntError(#[from] std::num::ParseIntError),
+
     #[error("Language error")]
     LanguageError(#[from] tree_sitter::LanguageError),
 
@@ -31,6 +34,9 @@ pub enum Error {
 
     #[error("Unexpected format error")]
     UnexpectedFormat,
+
+    #[error("Invalid state")]
+    InvalidState,
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
@@ -59,19 +65,13 @@ fn item_from_str<T: Into<String>>(label: T) -> CompletionItem {
 impl State {
     fn complete_account(&self) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(
-            self.data.accounts
-                .iter()
-                .map(item_from_str)
-                .collect(),
+            self.data.accounts.iter().map(item_from_str).collect(),
         )))
     }
 
     fn complete_currency(&self) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(
-            self.data.currencies
-                .iter()
-                .map(item_from_str)
-                .collect(),
+            self.data.currencies.iter().map(item_from_str).collect(),
         )))
     }
 
@@ -101,7 +101,8 @@ impl State {
         let prefix = &identifier[1..].trim_end();
 
         let candidates = self
-            .data.payees
+            .data
+            .payees
             .iter()
             .filter(|p| p.starts_with(prefix))
             .map(item_from_str)
@@ -169,30 +170,19 @@ impl Backend {
         }
     }
 
-    async fn check(&self, uri: Url) {
-        let client = match &self.client {
-            Some(client) => client,
-            None => {
-                return;
-            }
-        };
+    async fn check(&self, uri: Url) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| Error::InvalidState)?;
 
-        let check_cmd = match &self.check_cmd {
-            Some(cmd) => cmd,
-            None => {
-                return;
-            }
-        };
+        let check_cmd = self.check_cmd.as_ref().ok_or_else(|| Error::InvalidState)?;
 
-        let output = match Command::new(check_cmd).arg(uri.path()).output().await {
-            Ok(output) => output,
-            Err(_) => {
-                return;
-            }
-        };
+        let output = Command::new(check_cmd)
+            .arg(uri.path())
+            .output()
+            .await
+            .map_err(Error::from)?;
 
         let diags = if !output.status.success() {
-            let output = std::str::from_utf8(&output.stderr).unwrap();
+            let output = std::str::from_utf8(&output.stderr).map_err(Error::from)?;
 
             output
                 .lines()
@@ -221,6 +211,7 @@ impl Backend {
         };
 
         client.publish_diagnostics(uri, diags, None).await;
+        Ok(())
     }
 }
 
@@ -254,10 +245,12 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         if let Err(err) = self.load_ledgers(&params.text_document.uri).await {
-            self.log_message(MessageType::Info, err.to_string()).await;
+            self.log_message(MessageType::Error, err.to_string()).await;
         }
 
-        self.check(params.text_document.uri).await;
+        if let Err(err) = self.check(params.text_document.uri).await {
+            self.log_message(MessageType::Error, err.to_string()).await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -266,7 +259,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.check(params.text_document.uri).await;
+        if let Err(err) = self.check(params.text_document.uri).await {
+            self.log_message(MessageType::Error, err.to_string()).await;
+        }
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -336,7 +331,10 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(point, point)
         {
             if node.kind() == "currency" {
-                let location = state.data.commodities.get(node_text(&node, &state.data.text)?);
+                let location = state
+                    .data
+                    .commodities
+                    .get(node_text(&node, &state.data.text)?);
 
                 match location {
                     None => {
