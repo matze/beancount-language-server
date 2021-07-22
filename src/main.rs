@@ -331,19 +331,11 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(point, point)
         {
             if node.kind() == "currency" {
-                let location = state
+                return Ok(state
                     .data
                     .commodities
-                    .get(node_text(&node, &state.data.text)?);
-
-                match location {
-                    None => {
-                        return Ok(None);
-                    }
-                    Some(location) => {
-                        return Ok(Some(GotoDefinitionResponse::Array(vec![location.clone()])));
-                    }
-                }
+                    .get(node_text(&node, &state.data.text)?)
+                    .map(|loc| GotoDefinitionResponse::Array(vec![loc.clone()])));
             }
         }
 
