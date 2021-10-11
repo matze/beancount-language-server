@@ -171,9 +171,9 @@ impl Backend {
     }
 
     async fn check(&self, uri: Url) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| Error::InvalidState)?;
+        let client = self.client.as_ref().ok_or(Error::InvalidState)?;
 
-        let check_cmd = self.check_cmd.as_ref().ok_or_else(|| Error::InvalidState)?;
+        let check_cmd = self.check_cmd.as_ref().ok_or(Error::InvalidState)?;
 
         let output = Command::new(check_cmd)
             .arg(uri.path())
