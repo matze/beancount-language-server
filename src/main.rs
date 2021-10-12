@@ -26,6 +26,9 @@ pub enum Error {
     #[error("Language error")]
     LanguageError(#[from] tree_sitter::LanguageError),
 
+    #[error("Tree parse error")]
+    TreeParseError,
+
     #[error("Trie is empty")]
     TrieEmpty,
 
@@ -151,7 +154,7 @@ impl Backend {
         Self {
             client: Some(client),
             check_cmd,
-            check_re: regex::Regex::new(r"^[^:]+:(\d+):\s*(.*)$").unwrap(),
+            check_re: regex::Regex::new(r"^[^:]+:(\d+):\s*(.*)$").expect("failed to compile regex"),
             language: tree_sitter_beancount::language(),
             state: Arc::new(RwLock::new(State::default())),
         }
@@ -186,26 +189,25 @@ impl Backend {
 
             output
                 .lines()
-                .filter_map(|line| {
-                    if let Some(caps) = self.check_re.captures(line) {
-                        let position = Position {
-                            line: caps[1].parse::<u32>().unwrap().saturating_sub(1),
-                            character: 0,
-                        };
+                .filter_map(|line| self.check_re.captures(line))
+                .map(|caps| {
+                    let line = caps[1]
+                        .parse::<u32>()
+                        .map_err(Error::ParseIntError)?
+                        .saturating_sub(1);
 
-                        Some(Diagnostic {
-                            range: Range {
-                                start: position,
-                                end: position,
-                            },
-                            message: caps[2].trim().to_string(),
-                            ..Diagnostic::default()
-                        })
-                    } else {
-                        None
-                    }
+                    let position = Position { line, character: 0 };
+
+                    Ok(Diagnostic {
+                        range: Range {
+                            start: position,
+                            end: position,
+                        },
+                        message: caps[2].trim().to_string(),
+                        ..Diagnostic::default()
+                    })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>>>()?
         } else {
             vec![]
         };
@@ -270,7 +272,9 @@ impl LanguageServer for Backend {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(self.language).map_err(Error::from)?;
 
-        let tree = parser.parse(&state.data.text, None).unwrap();
+        let tree = parser
+            .parse(&state.data.text, None)
+            .ok_or(Error::TreeParseError)?;
 
         let line = params.text_document_position.position.line as usize;
         let char = params.text_document_position.position.character as usize;
@@ -316,7 +320,9 @@ impl LanguageServer for Backend {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(self.language).map_err(Error::from)?;
 
-        let tree = parser.parse(&state.data.text, None).unwrap();
+        let tree = parser
+            .parse(&state.data.text, None)
+            .ok_or(Error::TreeParseError)?;
 
         let line = params.text_document_position_params.position.line as usize;
         let char = params.text_document_position_params.position.character as usize;
@@ -345,18 +351,19 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         // Lets use brute force and delete everything and add the newly formatted stuff back.
         let state = self.state.read().await;
-        let formatted = beancount::reformat(&params.text_document.uri)?.unwrap();
-
-        Ok(Some(vec![TextEdit {
-            range: Range {
-                start: Position::default(),
-                end: Position {
-                    line: state.data.text.matches('\n').count() as u32,
-                    character: 0,
+        let formatted = beancount::reformat(&params.text_document.uri)?.and_then(|formatted| {
+            Some(vec![TextEdit {
+                range: Range {
+                    start: Position::default(),
+                    end: Position {
+                        line: state.data.text.matches('\n').count() as u32,
+                        character: 0,
+                    },
                 },
-            },
-            new_text: formatted,
-        }]))
+                new_text: formatted,
+            }])
+        });
+        Ok(formatted)
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -385,7 +392,7 @@ mod tests {
             Self {
                 client: None,
                 check_cmd: None,
-                check_re: regex::Regex::new(r"").unwrap(),
+                check_re: regex::Regex::new(r"").expect("unable to build empty regex"),
                 language: tree_sitter_beancount::language(),
                 state: Arc::new(RwLock::new(State::default())),
             }
