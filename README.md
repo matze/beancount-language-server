@@ -30,8 +30,8 @@ server](https://github.com/polarmutex/beancount-language-server), so for now you
 have to add an alternative configuration entry like this in your `init.vim`:
 
 ```lua
-local configs = require 'lspconfig/configs'
-local util = require 'lspconfig/util'
+local configs = require 'lspconfig.configs'
+local util = require 'lspconfig.util'
 
 configs["beancount_rs"] = {
   default_config = {
@@ -42,7 +42,7 @@ configs["beancount_rs"] = {
     end;
   };
   docs = {
-    description = "hello";
+    description = "A Beancount language server";
     default_config = {
       root_dir = [[root_pattern("elm.json")]];
     };
