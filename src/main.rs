@@ -228,7 +228,7 @@ impl LanguageServer for Backend {
             capabilities: ServerCapabilities {
                 // TODO: incremental is probably smarter
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::Full,
+                    TextDocumentSyncKind::FULL,
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -247,11 +247,11 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         if let Err(err) = self.load_ledgers(&params.text_document.uri).await {
-            self.log_message(MessageType::Error, err.to_string()).await;
+            self.log_message(MessageType::ERROR, err.to_string()).await;
         }
 
         if let Err(err) = self.check(params.text_document.uri).await {
-            self.log_message(MessageType::Error, err.to_string()).await;
+            self.log_message(MessageType::ERROR, err.to_string()).await;
         }
     }
 
@@ -262,7 +262,7 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         if let Err(err) = self.check(params.text_document.uri).await {
-            self.log_message(MessageType::Error, err.to_string()).await;
+            self.log_message(MessageType::ERROR, err.to_string()).await;
         }
     }
 
@@ -373,12 +373,10 @@ impl LanguageServer for Backend {
 
 #[tokio::main]
 async fn main() {
-    let (service, messages) = LspService::new(Backend::new);
+    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    let (service, socket) = LspService::new(Backend::new);
 
-    Server::new(tokio::io::stdin(), tokio::io::stdout())
-        .interleave(messages)
-        .serve(service)
-        .await;
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
 
 #[cfg(test)]
@@ -427,7 +425,7 @@ mod tests {
                 },
             },
             context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::Invoked,
+                trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
             }),
             work_done_progress_params: WorkDoneProgressParams {
@@ -480,7 +478,7 @@ mod tests {
                 },
             },
             context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::Invoked,
+                trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
             }),
             work_done_progress_params: WorkDoneProgressParams {
