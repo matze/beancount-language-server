@@ -351,8 +351,8 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         // Lets use brute force and delete everything and add the newly formatted stuff back.
         let state = self.state.read().await;
-        let formatted = beancount::reformat(&params.text_document.uri)?.and_then(|formatted| {
-            Some(vec![TextEdit {
+        let formatted = beancount::reformat(&params.text_document.uri)?.map(|formatted| {
+            vec![TextEdit {
                 range: Range {
                     start: Position::default(),
                     end: Position {
@@ -361,7 +361,7 @@ impl LanguageServer for Backend {
                     },
                 },
                 new_text: formatted,
-            }])
+            }]
         });
         Ok(formatted)
     }
