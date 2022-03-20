@@ -21,7 +21,7 @@ fn node_text_by_field_name<'a>(
 ) -> Result<&'a str, Error> {
     Ok(node
         .child_by_field_name(field_name)
-        .unwrap()
+        .ok_or_else(|| Error::InvalidState)?
         .utf8_text(bytes)?)
 }
 
@@ -39,7 +39,9 @@ impl Data {
 
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(tree_sitter_beancount::language())?;
-        let tree = parser.parse(&text, None).unwrap();
+        let tree = parser
+            .parse(&text, None)
+            .ok_or_else(|| Error::TreeParseError)?;
         let mut cursor = tree.root_node().walk();
 
         let mut commodities = HashMap::new();
@@ -177,15 +179,15 @@ impl Data {
     }
 }
 
-fn reformat_postings(postings: &Node, text: &str) -> String {
+fn reformat_postings(postings: &Node, text: &str) -> Result<String, Error> {
     let mut cursor = postings.walk();
     let bytes = text.as_bytes();
 
     let comments = postings
         .children(&mut cursor)
         .filter(|p| p.kind() == "comment")
-        .map(|p| format!("  {}\n", p.utf8_text(bytes).unwrap()))
-        .collect::<Vec<_>>();
+        .map(|p| Ok::<_, Error>(format!("  {}\n", p.utf8_text(bytes)?)))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let postings = postings
         .children(&mut cursor)
@@ -197,9 +199,8 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
         .map(|p| {
             let account = p
                 .child_by_field_name("account")
-                .unwrap()
-                .utf8_text(bytes)
-                .unwrap();
+                .ok_or_else(|| Error::InvalidState)?
+                .utf8_text(bytes)?;
 
             let amount = {
                 match p.child_by_field_name("amount") {
@@ -208,9 +209,17 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
 
                         assert_eq!(amount_children.len(), 2);
 
-                        let number = amount_children.next().unwrap().utf8_text(bytes).unwrap();
+                        let number = amount_children
+                            .next()
+                            .ok_or_else(|| Error::InvalidState)?
+                            .utf8_text(bytes)?;
+
                         let width = 50 - 4 - account.len();
-                        let currency = amount_children.next().unwrap().utf8_text(bytes).unwrap();
+
+                        let currency = amount_children
+                            .next()
+                            .ok_or_else(|| Error::InvalidState)?
+                            .utf8_text(bytes)?;
 
                         // We want to align so that the number period is always at column position 50. Hence we
                         // have to pad with 50 - 2 spaces before account - 1 space after account - 1 period -
@@ -235,20 +244,20 @@ fn reformat_postings(postings: &Node, text: &str) -> String {
             };
 
             let cost = match p.child_by_field_name("cost_spec") {
-                Some(cost) => format!(" {}", cost.utf8_text(bytes).unwrap()),
+                Some(cost) => format!(" {}", cost.utf8_text(bytes)?),
                 None => "".to_string(),
             };
 
             let comment = match p.child_by_field_name("comment") {
-                Some(comment) => format!("  {}", comment.utf8_text(bytes).unwrap()),
+                Some(comment) => format!("  {}", comment.utf8_text(bytes)?),
                 None => "".to_string(),
             };
 
-            format!("  {}{}{}{}", account, amount, cost, comment)
+            Ok::<_, Error>(format!("  {}{}{}{}", account, amount, cost, comment))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
-    format!("{}{}", comments.join("\n"), formatted.join("\n"))
+    Ok(format!("{}{}", comments.join("\n"), formatted.join("\n")))
 }
 
 fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Error> {
@@ -335,35 +344,37 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
 
             let txn_strings = node
                 .child_by_field_name("txn_strings")
-                .unwrap()
+                .ok_or_else(|| Error::InvalidState)?
                 .children(&mut node.walk())
                 .collect::<Vec<_>>();
 
-            let payee = txn_strings[0].utf8_text(bytes).unwrap();
+            let payee = txn_strings[0].utf8_text(bytes)?;
 
             let first_line = match txn_strings.len() {
                 1 => {
                     format!("{} {} {}", date, txn, payee)
                 }
                 2 => {
-                    let narration = txn_strings[1].utf8_text(bytes).unwrap();
+                    let narration = txn_strings[1].utf8_text(bytes)?;
                     format!("{} {} {} {}", date, txn, payee, narration)
                 }
                 _ => return Err(Error::UnexpectedFormat),
             };
 
-            let posting = node.child_by_field_name("posting_or_kv_list").unwrap();
+            let posting = node
+                .child_by_field_name("posting_or_kv_list")
+                .ok_or_else(|| Error::InvalidState)?;
 
             if cursor.goto_next_sibling() {
                 format!(
                     "{}\n{}{}{}",
                     first_line,
-                    reformat_postings(&posting, text),
+                    reformat_postings(&posting, text)?,
                     newlines(cursor),
                     reformat_top_level(cursor, text)?
                 )
             } else {
-                format!("{}\n{}", first_line, reformat_postings(&posting, text))
+                format!("{}\n{}", first_line, reformat_postings(&posting, text)?)
             }
         }
         _ => "".to_string(),
@@ -378,7 +389,11 @@ pub fn reformat(uri: &Url) -> Result<Option<String>, Error> {
 
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(tree_sitter_beancount::language())?;
-    let tree = parser.parse(&text, None).unwrap();
+
+    let tree = parser
+        .parse(&text, None)
+        .ok_or_else(|| Error::TreeParseError)?;
+
     let mut cursor = tree.root_node().walk();
 
     Ok(Some(reformat_top_level(&mut cursor, &text)?))
