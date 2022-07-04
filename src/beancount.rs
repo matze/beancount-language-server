@@ -377,6 +377,13 @@ fn reformat_top_level(cursor: &mut TreeCursor, text: &str) -> Result<String, Err
                 format!("{}\n{}", first_line, reformat_postings(&posting, text)?)
             }
         }
+        "\n" => {
+            if cursor.goto_next_sibling() {
+                format!("\n{}", reformat_top_level(cursor, text)?)
+            } else {
+                "".to_string()
+            }
+        }
         _ => "".to_string(),
     };
 
@@ -517,7 +524,9 @@ plugin    "beancount.plugins.check_commodity"
 
 include "commodities.beancount"  
 
-  2015-01-02 open Expenses:Foo:Bar "#
+  2015-01-02 open Expenses:Foo:Bar
+
+"#
         )?;
 
         let reformatted = reformat(file.path())?;
@@ -528,7 +537,8 @@ plugin "beancount.plugins.check_commodity"
 
 include "commodities.beancount"
 
-2015-01-02 open Expenses:Foo:Bar"#;
+2015-01-02 open Expenses:Foo:Bar
+"#;
 
         assert_eq!(reformatted, expected);
         Ok(())
@@ -543,13 +553,15 @@ include "commodities.beancount"
             r#"2021-07-10  ! "foo"     "bar"
  Expenses:Cash             100.00 EUR
    Assets:Checking    -100.00 EUR
+
         "#
         )?;
 
         let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 ! "foo" "bar"
   Expenses:Cash                               100.00 EUR
-  Assets:Checking                            -100.00 EUR"#;
+  Assets:Checking                            -100.00 EUR
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -566,6 +578,7 @@ include "commodities.beancount"
     ; some comment
  Expenses:Cash             100.00 EUR
    Assets:Checking    -100.00 EUR
+
         "#
         )?;
 
@@ -573,7 +586,8 @@ include "commodities.beancount"
         let expected = r#"2021-07-10 ! "foo" "bar"
   ; some comment
   Expenses:Cash                               100.00 EUR
-  Assets:Checking                            -100.00 EUR"#;
+  Assets:Checking                            -100.00 EUR
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -589,13 +603,15 @@ include "commodities.beancount"
             r#"2021-07-10  * "foo"
  Expenses:Cash             100.00 EUR
    Assets:Checking    -100.00 EUR
+
         "#
         )?;
 
         let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo"
   Expenses:Cash                               100.00 EUR
-  Assets:Checking                            -100.00 EUR"#;
+  Assets:Checking                            -100.00 EUR
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -616,6 +632,7 @@ include "commodities.beancount"
 2021-07-11  ! "foo"   "bar"
  Expenses:Cash              99.00 EUR
    Assets:Checking    -99.00 EUR
+
         "#
         )?;
 
@@ -627,7 +644,8 @@ include "commodities.beancount"
   Assets:Checking                            -100.00 EUR
 2021-07-11 ! "foo" "bar"
   Expenses:Cash                                99.00 EUR
-  Assets:Checking                             -99.00 EUR"#;
+  Assets:Checking                             -99.00 EUR
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -643,13 +661,15 @@ include "commodities.beancount"
             r#" 2021-07-10  * "foo"     "bar"
  Expenses:Cash             100.00 EUR ; foo
    Assets:Checking    -100.00 EUR       ; bar
+
         "#
         )?;
 
         let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo" "bar"
   Expenses:Cash                               100.00 EUR  ; foo
-  Assets:Checking                            -100.00 EUR  ; bar"#;
+  Assets:Checking                            -100.00 EUR  ; bar
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -665,13 +685,15 @@ include "commodities.beancount"
             r#" 2021-07-10  * "foo"     "bar"
  Assets:Cash             100.00 EUR
    Assets:AAPL    1 AAPL {{100.00 EUR}}
+
         "#
         )?;
 
         let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo" "bar"
   Assets:Cash                                 100.00 EUR
-  Assets:AAPL                                   1 AAPL {100.00 EUR}"#;
+  Assets:AAPL                                   1 AAPL {100.00 EUR}
+"#;
 
         assert_eq!(reformatted, expected);
 
@@ -687,13 +709,15 @@ include "commodities.beancount"
             r#" 2021-07-10  * "foo"     "bar"
  Expenses:Cash             100.00 EUR ; foo
    Assets:Checking
+
         "#
         )?;
 
         let reformatted = reformat(file.path())?;
         let expected = r#"2021-07-10 * "foo" "bar"
   Expenses:Cash                               100.00 EUR  ; foo
-  Assets:Checking"#;
+  Assets:Checking
+"#;
 
         assert_eq!(reformatted, expected);
 

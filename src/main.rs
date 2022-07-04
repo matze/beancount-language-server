@@ -401,6 +401,7 @@ mod tests {
         Ok(Url::from_file_path(path).map_err(|_| Error::UriToPathConversion)?)
     }
 
+    #[ignore]
     #[tokio::test]
     async fn complete_root_account() -> std::result::Result<(), Error> {
         let mut file = tempfile::NamedTempFile::new()?;
